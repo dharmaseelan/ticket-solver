@@ -1,0 +1,15 @@
+[
+  {
+    "ticketSubject": "Remove the heading from the Add To Calendar section",
+    "ticketRequest": "First Name: Hannah\nLast Name: Stevens\nEmail: hannah.stevens@harveynash.com\nSubject: Adding an event in someone calendar for an event\nWebsite affected: Harvey Nash all websites\nTicket Type: Support\nPages affected: harvey nash page builder\nCountry / Region: All websites\nTicket description: Hi team, hope you're well. Please could I request to remove heading on AddToCalendar component.",
+    "godfatherNote": "can we comment out the heading",
+    "projectPath": "/Users/dharma/Documents/Sourceflow Projects/Tickets/harvey-nash-uk",
+    "changes": [
+      "Commented out heading JSX block in AddToCalendar component"
+    ],
+    "filesChanged": [
+      "src/builder/AddToCalendar/component.jsx"
+    ],
+    "savedAt": "2026-06-07T10:36:24.343Z"
+  }
+]
