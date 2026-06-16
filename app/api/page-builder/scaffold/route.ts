@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
+const ENV_VARS = [
+  "NEXT_PUBLIC_BASE_URL",
+  "NEXT_PUBLIC_SITE_NAME",
+  "NEXT_PUBLIC_SITE_DESCRIPTION",
+  "NEXT_PUBLIC_TWITTER_HANDLE",
+  "NEXT_PUBLIC_LOGO",
+];
+
 const TEMPLATES: Record<string, string> = {
   "hooks/useDynamicPage.js": `import useDynamicPages from "@/hooks/useDynamicPages";
 
@@ -364,6 +372,22 @@ export async function POST(req: NextRequest) {
   const results: { key: string; success: boolean; error?: string }[] = [];
 
   for (const key of files) {
+    if (key === ".env") {
+      try {
+        const envPath = path.join(projectPath, ".env");
+        const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+        const missing = ENV_VARS.filter((v) => !new RegExp(`^${v}=`, "m").test(existing));
+        if (missing.length > 0) {
+          const block = `\n# Page Builder - Public Variables\n${missing.map((v) => `${v}=""`).join("\n")}\n`;
+          fs.appendFileSync(envPath, block);
+        }
+        results.push({ key, success: true });
+      } catch (e) {
+        results.push({ key, success: false, error: e instanceof Error ? e.message : String(e) });
+      }
+      continue;
+    }
+
     const template = TEMPLATES[key];
     if (!template) {
       results.push({ key, success: false, error: "No template found" });

@@ -2,7 +2,30 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
+const ENV_VARS = [
+  "NEXT_PUBLIC_BASE_URL",
+  "NEXT_PUBLIC_SITE_NAME",
+  "NEXT_PUBLIC_SITE_DESCRIPTION",
+  "NEXT_PUBLIC_TWITTER_HANDLE",
+  "NEXT_PUBLIC_LOGO",
+];
+
+function checkEnvFile(projectPath: string): { exists: boolean; content: string } {
+  for (const candidate of [".env", ".env.local"]) {
+    const fullPath = path.join(projectPath, candidate);
+    if (fs.existsSync(fullPath)) {
+      let content = "";
+      try { content = fs.readFileSync(fullPath, "utf8"); } catch {}
+      const allPresent = ENV_VARS.every((v) => new RegExp(`^${v}=`, "m").test(content));
+      const relevantLines = content.split("\n").filter((line) => ENV_VARS.some((v) => line.startsWith(v)));
+      return { exists: allPresent, content: relevantLines.join("\n") };
+    }
+  }
+  return { exists: false, content: "" };
+}
+
 export const FILES = [
+  { key: ".env", label: "Public Variables", group: "env" },
   { key: "hooks/useDynamicPage.js", label: "useDynamicPage.js", group: "hooks" },
   { key: "hooks/useDynamicPages.js", label: "useDynamicPages.js", group: "hooks" },
   { key: "hooks/useGlobal.js", label: "useGlobal.js", group: "hooks" },
@@ -65,6 +88,10 @@ export async function POST(req: NextRequest) {
   }
 
   const files = FILES.map((f) => {
+    if (f.key === ".env") {
+      const { exists, content } = checkEnvFile(projectPath);
+      return { ...f, exists, content };
+    }
     const { exists, content } = findFile(projectPath, f.key);
     return { ...f, exists, content };
   });

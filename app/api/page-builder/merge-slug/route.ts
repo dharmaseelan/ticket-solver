@@ -25,55 +25,15 @@ const SLUG_CANDIDATES = [
   "src/pages/[url_slug].js",
 ];
 
-const BOILERPLATE_SLUG = `import useDynamicPage from "@/hooks/useDynamicPage";
-import useDynamicPages from "@/hooks/useDynamicPages";
-import { DynamicPageSeo } from "@/ui/DynamicPageSeo";
-import { ContentBlocks } from "@/ui/ContentBlocks";
+const BOILERPLATE_PATH = "/Users/dharma/Documents/Sourceflow Projects/Tickets/pb-snippets/pages/[...url_slugs]/index.js";
 
-export default function SimplePage({ prefix, title, seo, canonical, data }) {
-  return (
-    <>
-      <DynamicPageSeo
-        {...seo}
-        title={seo?.title.length > 0 ? seo.title : title}
-        canonical={seo?.canonical.length > 0 ? seo.canonical : canonical}
-      />
-      <ContentBlocks data={data} prefix={prefix} />
-    </>
-  );
-}
-
-export async function getStaticProps({ params: { url_slugs } }) {
-  const url_slug = url_slugs.join("/");
-  const page = useDynamicPage(url_slug);
-
-  if (page?.is_draft === true) {
-    return { notFound: true };
+function readBoilerplateSlug(): string {
+  try {
+    return fs.readFileSync(BOILERPLATE_PATH, "utf8");
+  } catch {
+    return "";
   }
-
-  return {
-    props: {
-      prefix: \`page_\${url_slug.replaceAll(/[\\/\\-]/g, "_")}\`,
-      title: page.title,
-      seo: page.seo,
-      canonical: \`/\${url_slug}\`,
-      data: page.content,
-    },
-  };
 }
-
-export async function getStaticPaths() {
-  const pages = useDynamicPages();
-  const exclude = [];
-  const paths = pages
-    .filter((i) => !exclude.includes(i.url_slug))
-    .map((i) => ({ params: { url_slugs: i.url_slug.split("/") } }));
-
-  return {
-    paths,
-    fallback: false,
-  };
-}`;
 
 export async function POST(req: NextRequest) {
   const { projectPath }: { projectPath: string } = await req.json();
@@ -87,6 +47,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
   }
 
+  const boilerplateSlug = readBoilerplateSlug();
+
   // Find existing url_slug file
   let foundAt = "";
   let existingContent = "";
@@ -99,15 +61,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // No existing url_slug — use boilerplate directly, no AI merge needed
   if (!foundAt) {
-    return NextResponse.json({ error: "No url_slug file found in this project" }, { status: 404 });
+    if (!boilerplateSlug) {
+      return NextResponse.json({ error: "No url_slug file found and boilerplate is unavailable" }, { status: 404 });
+    }
+    const outputRel = "pages/page-builder-setup/index.js";
+    const outputPath = path.join(projectPath, outputRel);
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, boilerplateSlug + "\n", "utf8");
+    return NextResponse.json({ success: true, outputPath: outputRel, content: boilerplateSlug, foundAt: "" });
   }
 
   const prompt = `You are a Next.js developer merging Sourceflow Page Builder support into an existing dynamic page file.
 
 ## Page Builder boilerplate (pure page builder slug — use as reference for the pattern):
 \`\`\`js
-${BOILERPLATE_SLUG}
+${boilerplateSlug}
 \`\`\`
 
 ## Existing site's dynamic page file (${foundAt}):

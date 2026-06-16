@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { LayoutTemplate, Puzzle, RefreshCw, ChevronDown, ChevronRight, Package, FolderOpen, AlertCircle, X, Trash2, Code2, Layers, FileCode, Box, Zap } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { LayoutTemplate, Puzzle, RefreshCw, ChevronDown, ChevronRight, Package, FolderOpen, AlertCircle, X, Trash2, Code2, Layers, FileCode, Box, Zap, KeyRound } from "lucide-react";
 import { FolderPicker } from "@/app/components/FolderPicker";
 import dynamic from "next/dynamic";
 const CodeBlock = dynamic(() => import("@/app/components/CodeBlock"), { ssr: false });
@@ -30,6 +30,7 @@ type PBProject = {
 export default function PageBuilderSetupPage() {
   const [activeTab, setActiveTab] = useState<Tab>("setup");
   const [setupTab, setSetupTab] = useState<SetupTab>("installation");
+  const [componentsTab, setComponentsTab] = useState<"installation" | "preview">("installation");
 
   // Page Builder Setup tab state (independent)
   const [setupRootInput, setSetupRootInput] = useState("");
@@ -54,6 +55,13 @@ export default function PageBuilderSetupPage() {
   const [previewCodeOpen, setPreviewCodeOpen] = useState(true);
   const [mergeFoundAt, setMergeFoundAt] = useState("");
   const [mergeContent, setMergeContent] = useState("");
+  const [treePreviewFile, setTreePreviewFile] = useState<Record<string, string>>({});
+  const [treeDirOpen, setTreeDirOpen] = useState<Record<string, boolean>>({});
+  const [builderTreeWidth, setBuilderTreeWidth] = useState(196);
+  const [builderHandleHover, setBuilderHandleHover] = useState(false);
+  const builderResizing = useRef(false);
+  const builderResizeStartX = useRef(0);
+  const builderResizeStartW = useRef(0);
 
   // Add Components tab state
   const [pbRootInput, setPbRootInput] = useState("");
@@ -70,6 +78,7 @@ export default function PageBuilderSetupPage() {
   const [deleteGeneratedTarget, setDeleteGeneratedTarget] = useState<string | null>(null);
   const [generatedExpanded, setGeneratedExpanded] = useState<Record<string, boolean>>({});
   const [generatedFileTab, setGeneratedFileTab] = useState<Record<string, number>>({});
+  const [generatedTreeFile, setGeneratedTreeFile] = useState<Record<string, string>>({});
   const [selectedBuilderComp, setSelectedBuilderComp] = useState<{ projectPath: string; compName: string } | null>(null);
 
   useEffect(() => {
@@ -87,6 +96,22 @@ export default function PageBuilderSetupPage() {
       const savedEntries = localStorage.getItem("pbGeneratedEntries");
       if (savedEntries) setGeneratedEntries(JSON.parse(savedEntries));
     } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    function onMouseMove(e: MouseEvent) {
+      if (!builderResizing.current) return;
+      const delta = e.clientX - builderResizeStartX.current;
+      const newW = Math.max(120, Math.min(300, builderResizeStartW.current + delta));
+      setBuilderTreeWidth(newW);
+    }
+    function onMouseUp() { builderResizing.current = false; setBuilderHandleHover(false); }
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
   }, []);
 
   async function scanProjects(root: string) {
@@ -657,8 +682,9 @@ export default function PageBuilderSetupPage() {
                   style={{
                     background: installState === "done" ? "#0d2b1d" : installState === "error" ? "#2b0d0d" : "#1f6feb",
                     color: installState === "done" ? "#3fb950" : installState === "error" ? "#f85149" : "#fff",
-                    width: "70px",
+                    width: "100px",
                     fontWeight: 500,
+                    whiteSpace: "nowrap",
                   }}
                 >
                   {installState === "running" && (
@@ -703,7 +729,7 @@ export default function PageBuilderSetupPage() {
                 );
               })()}
 
-              {(["hooks", "ui", "pages", "builder"] as const).map((group) => {
+              {(["env", "hooks", "ui", "pages", "builder"] as const).map((group) => {
                 const groupFiles = setupFiles.filter((f) => f.group === group);
                 if (!groupFiles.length) return null;
                 const isOpen = fileGroupOpen[group] ?? false;
@@ -716,7 +742,7 @@ export default function PageBuilderSetupPage() {
                       className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#161b22] transition-colors"
                       style={{ background: "#0d1117" }}
                     >
-                      <span className="flex-1 text-left text-[11px] font-mono" style={{ color: "#8b949e" }}>{group}/</span>
+                      <span className="flex-1 text-left text-[12px] font-mono" style={{ color: "#8b949e" }}>{group}/</span>
                       {groupMissing > 0 && (
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#1a1206", color: "#d29922" }}>
                           {groupMissing} missing
@@ -734,7 +760,7 @@ export default function PageBuilderSetupPage() {
                               className="flex items-center justify-between px-2 py-1.5"
                               style={{ borderBottom: fi < groupFiles.length - 1 ? "1px solid #21262d" : "none" }}
                             >
-                              <span className="text-[12px] font-mono" style={{ color: "#e6edf3" }}>{f.label}</span>
+                              <span className="text-[11px] font-mono" style={{ color: "#e6edf3" }}>{f.label}</span>
                               <span
                                 className="text-[10px] font-mono px-2 py-0.5 rounded-md transition-all duration-500"
                                 style={isOk
@@ -771,8 +797,9 @@ export default function PageBuilderSetupPage() {
                   style={{
                     background: scaffoldState === "done" ? "#0d2b1d" : scaffoldState === "error" ? "#2b0d0d" : "#1f6feb",
                     color: scaffoldState === "done" ? "#3fb950" : scaffoldState === "error" ? "#f85149" : "#fff",
-                    width: "70px",
+                    width: "100px",
                     fontWeight: 500,
+                    whiteSpace: "nowrap",
                   }}
                 >
                   {scaffoldState === "running" && (
@@ -870,6 +897,8 @@ export default function PageBuilderSetupPage() {
 
             // Group: "hooks" + "ui" + "pages" each as one entry with all files as tabs
             const groups: { key: string; label: string; files: typeof existingFiles }[] = [];
+            const envFiles = existingFiles.filter((f) => f.group === "env");
+            if (envFiles.length) groups.push({ key: "env", label: "env", files: envFiles });
             const hooksFiles = existingFiles.filter((f) => f.group === "hooks");
             if (hooksFiles.length) groups.push({ key: "hooks", label: "hooks", files: hooksFiles });
             const uiFiles = existingFiles.filter((f) => f.group === "ui");
@@ -904,7 +933,9 @@ export default function PageBuilderSetupPage() {
                           onClick={() => setFileExpandedMap((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
                           className="w-full flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-[#161b22] transition-colors"
                         >
-                          {group.key === "hooks"
+                          {group.key === "env"
+                            ? <KeyRound size={13} color="#8b949e" style={{ flexShrink: 0 }} />
+                            : group.key === "hooks"
                             ? <Code2 size={13} color="#8b949e" style={{ flexShrink: 0 }} />
                             : group.key === "ui"
                             ? <Layers size={13} color="#8b949e" style={{ flexShrink: 0 }} />
@@ -915,33 +946,112 @@ export default function PageBuilderSetupPage() {
                           <span className="flex-1 text-left text-[12px] font-mono text-[#8b949e]">{group.label}</span>
                           {isOpen ? <ChevronDown size={13} color="#555" /> : <ChevronRight size={13} color="#555" />}
                         </button>
-                        {isOpen && (
-                          <div style={{ background: "#0d1117" }}>
-                            <div className="flex border-b border-t overflow-x-auto" style={{ borderColor: "#21262d", scrollbarWidth: "none" }}>
-                              {group.files.map((f, i) => (
-                                <button
-                                  key={f.key}
-                                  type="button"
-                                  onClick={() => setFilePreviewTab((prev) => ({ ...prev, [group.key]: i }))}
-                                  className="shrink-0 px-3 py-1.5 text-[11px] font-mono cursor-pointer transition-colors"
-                                  style={{
-                                    color: tabIdx === i ? "#e6edf3" : "#8b949e",
-                                    borderBottom: tabIdx === i ? "2px solid #3fb950" : "2px solid transparent",
-                                    background: "transparent",
-                                  }}
-                                >
-                                  {f.label}
-                                </button>
-                              ))}
-                            </div>
-                            <div style={{ maxHeight: "320px", overflowY: "auto", background: "#0d1117" }}>
-                              <CodeBlock
-                                code={activeFile?.content ?? ""}
-                                language={activeFile?.key.endsWith(".ts") || activeFile?.key.endsWith(".tsx") ? "typescript" : "javascript"}
+                        {isOpen && (() => {
+                          const prefix = `${group.key}/`;
+                          const rootFilesList: typeof group.files = [];
+                          const subDirs: Record<string, typeof group.files> = {};
+                          for (const f of group.files) {
+                            const rel = f.key.slice(prefix.length);
+                            const parts = rel.split("/");
+                            if (parts.length === 1) {
+                              rootFilesList.push(f);
+                            } else {
+                              const dir = parts[0];
+                              if (!subDirs[dir]) subDirs[dir] = [];
+                              subDirs[dir].push(f);
+                            }
+                          }
+                          const selFile = group.files.find((f) => f.key === (treePreviewFile[group.key] ?? "")) ?? group.files[0];
+                          const selLang = selFile?.key.endsWith(".scss") ? "scss" : selFile?.key.endsWith(".ts") || selFile?.key.endsWith(".tsx") ? "typescript" : "javascript";
+                          const fileIcon = (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                              <polyline points="14 2 14 8 20 8" />
+                            </svg>
+                          );
+                          const folderIcon = (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
+                              <path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" />
+                            </svg>
+                          );
+                          return (
+                            <div style={{ display: "flex", borderTop: "1px solid #21262d", height: "320px", userSelect: builderResizing.current ? "none" : "auto" }}>
+                              <div style={{ width: `${builderTreeWidth}px`, flexShrink: 0, overflowY: "auto", overflowX: "hidden" }}>
+                                <div className="flex items-center gap-1.5 px-3 py-1.5" style={{ color: "#6e7681" }}>
+                                  {folderIcon}
+                                  <span className="text-[10px] font-mono">{group.key}</span>
+                                </div>
+                                {rootFilesList.map((f) => {
+                                  const filename = f.key.startsWith(prefix) ? f.key.slice(prefix.length) : f.key;
+                                  const isSel = selFile?.key === f.key;
+                                  return (
+                                    <button
+                                      key={f.key}
+                                      type="button"
+                                      onClick={() => setTreePreviewFile((prev) => ({ ...prev, [group.key]: f.key }))}
+                                      className="w-full flex items-center gap-1.5 pl-5 pr-3 py-1 cursor-pointer transition-colors text-left hover:bg-[#1c2128]"
+                                      style={{ background: isSel ? "#21262d" : undefined, color: isSel ? "#e6edf3" : "#8b949e" }}
+                                    >
+                                      {fileIcon}
+                                      <span className="text-[10px] font-mono truncate">{filename}</span>
+                                    </button>
+                                  );
+                                })}
+                                {Object.entries(subDirs).map(([dir, files]) => {
+                                  const isDirOpen = treeDirOpen[`${group.key}-${dir}`] ?? true;
+                                  return (
+                                    <div key={dir}>
+                                      <button
+                                        type="button"
+                                        onClick={() => setTreeDirOpen((prev) => ({ ...prev, [`${group.key}-${dir}`]: !isDirOpen }))}
+                                        className="w-full flex items-center gap-1.5 pl-5 pr-3 py-1 cursor-pointer transition-colors hover:bg-[#1c2128] hover:text-[#c9d1d9]"
+                                        style={{ color: "#8b949e" }}
+                                      >
+                                        {isDirOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                                        {folderIcon}
+                                        <span className="text-[10px] font-mono">{dir}</span>
+                                      </button>
+                                      {isDirOpen && files.map((f) => {
+                                        const filename = f.key.slice(`${prefix}${dir}/`.length);
+                                        const isSel = selFile?.key === f.key;
+                                        return (
+                                          <button
+                                            key={f.key}
+                                            type="button"
+                                            onClick={() => setTreePreviewFile((prev) => ({ ...prev, [group.key]: f.key }))}
+                                            className="w-full flex items-center gap-1.5 pl-11 pr-3 py-1 cursor-pointer transition-colors text-left hover:bg-[#1c2128]"
+                                            style={{ background: isSel ? "#21262d" : undefined, color: isSel ? "#e6edf3" : "#8b949e" }}
+                                          >
+                                            {fileIcon}
+                                            <span className="text-[10px] font-mono truncate">{filename}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <div
+                                style={{ width: "2px", flexShrink: 0, cursor: "col-resize", background: builderHandleHover ? "#2d333a" : "#21262d", transition: "background 0.15s" }}
+                                onMouseEnter={() => setBuilderHandleHover(true)}
+                                onMouseLeave={() => { if (!builderResizing.current) setBuilderHandleHover(false); }}
+                                onMouseDown={(e) => {
+                                  builderResizing.current = true;
+                                  builderResizeStartX.current = e.clientX;
+                                  builderResizeStartW.current = builderTreeWidth;
+                                  e.preventDefault();
+                                }}
                               />
+                              <div style={{ flex: 1, overflowY: "auto", background: "#0d1117", minWidth: 0 }}>
+                                {selFile ? (
+                                  <CodeBlock code={selFile.content ?? ""} language={selLang} />
+                                ) : (
+                                  <div className="flex items-center justify-center h-full text-[12px]" style={{ color: "#484f58" }}>Select a file</div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </div>
                     );
                   })}
@@ -1063,6 +1173,25 @@ export default function PageBuilderSetupPage() {
 
           </div>
 
+          {/* Sub-tab buttons */}
+          {pbRootPath && <div className="flex p-1 rounded-lg" style={{ background: "#161b22", border: "1px solid #30363d", width: "fit-content" }}>
+            {(["installation", "preview"] as ("installation" | "preview")[]).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setComponentsTab(tab)}
+                className="px-4 py-1.5 rounded-md text-[12px] font-semibold cursor-pointer transition-all capitalize"
+                style={componentsTab === tab
+                  ? { background: "#58a6ff18", color: "#58a6ff", border: "1px solid #58a6ff28" }
+                  : { background: "transparent", color: "#8b949e", border: "1px solid transparent" }
+                }
+              >
+                {tab}
+              </button>
+            ))}
+          </div>}
+
+          {pbRootPath && componentsTab === "installation" && <>
           {/* Page Builder Components */}
           {!scanning && !scanError && setupProjects.length > 0 && (
             <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
@@ -1345,25 +1474,31 @@ export default function PageBuilderSetupPage() {
 
             </div>
           )}
+          </>}
 
+          {pbRootPath && componentsTab === "preview" && <>
           {/* Generated Component — standalone card, persists after rescan */}
           {(() => {
             const entries = Object.values(generatedEntries);
-            if (entries.length === 0) return null;
             return (
               <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-[11px] uppercase tracking-widest text-[#3fb950]">Generated Components</span>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#0d2b1d", color: "#3fb950" }}>
-                    {entries.length}
-                  </span>
+                  {entries.length > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#0d2b1d", color: "#3fb950" }}>{entries.length}</span>}
                 </div>
+                {entries.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 gap-3">
+                    <Layers size={24} style={{ color: "#30363d" }} />
+                    <div className="text-center">
+                      <div className="text-[13px] font-semibold mb-1" style={{ color: "#484f58" }}>No generated components yet</div>
+                      <div className="text-[11px]" style={{ color: "#3d444d" }}>Head to the Installation tab, select components, and click Generate.</div>
+                    </div>
+                  </div>
+                ) : (
                 <div className="flex flex-col gap-2">
                   {entries.map((entry) => {
                     const key = `${entry.projectPath}::${entry.compName}`;
                     const isOpen = generatedExpanded[key] ?? false;
-                    const tabIdx = generatedFileTab[key] ?? 0;
-                    const activeFile = entry.files[tabIdx];
                     return (
                       <div key={key} className="rounded-lg overflow-hidden" style={{ background: "#0d1117", border: "1px solid #21262d" }}>
                         <div className="flex items-center">
@@ -1388,40 +1523,73 @@ export default function PageBuilderSetupPage() {
                           </button>
                         </div>
 
-                        {isOpen && (
-                          <div style={{ background: "#0d1117" }}>
-                            <div className="flex border-b border-t" style={{ borderColor: "#21262d" }}>
-                              {entry.files.map((file, i) => (
-                                <button
-                                  key={file.name}
-                                  type="button"
-                                  onClick={() => setGeneratedFileTab((prev) => ({ ...prev, [key]: i }))}
-                                  className="px-3 py-1.5 text-[11px] font-mono cursor-pointer transition-colors"
-                                  style={{
-                                    color: tabIdx === i ? "#e6edf3" : "#8b949e",
-                                    borderBottom: tabIdx === i ? "2px solid #3fb950" : "2px solid transparent",
-                                    background: "transparent",
-                                  }}
-                                >
-                                  {file.name}
-                                </button>
-                              ))}
+                        {isOpen && (() => {
+                          const selFile = entry.files.find((f) => f.name === (generatedTreeFile[key] ?? "")) ?? entry.files[0];
+                          const selLang = selFile?.name.endsWith(".scss") ? "scss" : selFile?.name.endsWith(".ts") || selFile?.name.endsWith(".tsx") ? "typescript" : "javascript";
+                          const fileIcon = (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                              <polyline points="14 2 14 8 20 8" />
+                            </svg>
+                          );
+                          const folderIcon = (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
+                              <path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" />
+                            </svg>
+                          );
+                          return (
+                            <div style={{ display: "flex", borderTop: "1px solid #21262d", height: "320px", userSelect: builderResizing.current ? "none" : "auto" }}>
+                              <div style={{ width: `${builderTreeWidth}px`, flexShrink: 0, overflowY: "auto", overflowX: "hidden" }}>
+                                <div className="flex items-center gap-1.5 px-3 py-1.5" style={{ color: "#6e7681" }}>
+                                  {folderIcon}
+                                  <span className="text-[10px] font-mono">{entry.compName}</span>
+                                </div>
+                                {entry.files.map((f) => {
+                                  const isSel = selFile?.name === f.name;
+                                  return (
+                                    <button
+                                      key={f.name}
+                                      type="button"
+                                      onClick={() => setGeneratedTreeFile((prev) => ({ ...prev, [key]: f.name }))}
+                                      className="w-full flex items-center gap-1.5 pl-5 pr-3 py-1 cursor-pointer transition-colors text-left hover:bg-[#1c2128]"
+                                      style={{ background: isSel ? "#21262d" : undefined, color: isSel ? "#e6edf3" : "#8b949e" }}
+                                    >
+                                      {fileIcon}
+                                      <span className="text-[10px] font-mono truncate">{f.name}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              <div
+                                style={{ width: "2px", flexShrink: 0, cursor: "col-resize", background: builderHandleHover ? "#2d333a" : "#21262d", transition: "background 0.15s" }}
+                                onMouseEnter={() => setBuilderHandleHover(true)}
+                                onMouseLeave={() => { if (!builderResizing.current) setBuilderHandleHover(false); }}
+                                onMouseDown={(e) => {
+                                  builderResizing.current = true;
+                                  builderResizeStartX.current = e.clientX;
+                                  builderResizeStartW.current = builderTreeWidth;
+                                  e.preventDefault();
+                                }}
+                              />
+                              <div style={{ flex: 1, overflowY: "auto", background: "#0d1117", minWidth: 0 }}>
+                                {selFile ? (
+                                  <CodeBlock code={selFile.content ?? ""} language={selLang} />
+                                ) : (
+                                  <div className="flex items-center justify-center h-full text-[12px]" style={{ color: "#484f58" }}>Select a file</div>
+                                )}
+                              </div>
                             </div>
-                            <pre
-                              className="text-[11px] font-mono leading-relaxed overflow-x-auto"
-                              style={{ padding: "12px 14px", color: "#c9d1d9", margin: 0, maxHeight: "400px", overflowY: "auto" }}
-                            >
-                              {activeFile?.content}
-                            </pre>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </div>
                     );
                   })}
                 </div>
+                )}
               </div>
             );
           })()}
+          </>}
         </div>
       )}
     </div>

@@ -6,7 +6,7 @@ import "./globals.css";
 const roboto = Roboto({ subsets: ["latin"], weight: ["400", "500", "700"] });
 
 export const metadata: Metadata = {
-  title: "Sync",
+  title: "Revive",
   description: "Sourceflow HubSpot ticket triage & fix agent",
 };
 

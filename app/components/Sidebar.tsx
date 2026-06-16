@@ -67,7 +67,7 @@ export function Sidebar() {
           <div className="flex items-center gap-3 min-w-0">
             <div className="min-w-0">
               <div className="font-bold leading-tight truncate" style={{ color: "#ffffff", fontSize: 24 }}>
-                Sync
+                Revive
               </div>
             </div>
           </div>
