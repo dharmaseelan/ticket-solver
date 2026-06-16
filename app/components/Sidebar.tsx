@@ -2,7 +2,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { History, Zap, PanelLeftClose, PanelLeftOpen, LayoutTemplate, FolderGit2 } from "lucide-react";
+import { History, Zap, PanelLeftClose, PanelLeftOpen, LayoutTemplate, FolderGit2, BrainCircuit } from "lucide-react";
 import { useState, useEffect } from "react";
 
 export function Sidebar() {
@@ -89,6 +89,7 @@ export function Sidebar() {
         {[
           { href: "/", label: "Tickets", icon: Zap },
           { href: "/page-builder-setup", label: "Page Builder", icon: LayoutTemplate },
+          { href: "/ai-job-search", label: "AI Job Search", icon: BrainCircuit },
           { href: "/projects", label: "Projects", icon: FolderGit2, count: projectCount },
           { href: "/history", label: "History", icon: History, count: historyCount },
         ].map(({ href, label, icon: Icon, count }) => {

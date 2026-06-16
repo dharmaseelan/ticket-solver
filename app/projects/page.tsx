@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { Search, Lock, Globe, GitBranch, X, RefreshCw, ChevronDown, ChevronRight, Trash2, Laptop } from "lucide-react";
 import { FolderPicker } from "@/app/components/FolderPicker";
+import { ToastContainer, type ToastItem } from "@/app/components/Toast";
 
 
 type Repo = {
@@ -64,6 +65,16 @@ export default function ProjectsPage() {
   const [setupState, setSetupState] = useState<Record<string, "idle" | "running" | "done" | "error">>({});
   const [setupProgress, setSetupProgress] = useState<Record<string, number>>({});
   const [deleteTarget, setDeleteTarget] = useState<{ name: string; path: string } | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  function addToast(toast: Omit<ToastItem, "id">) {
+    const id = Math.random().toString(36).slice(2);
+    setToasts((prev) => [...prev, { ...toast, id }]);
+  }
+
+  function dismissToast(id: string) {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }
 
   useEffect(() => {
     const cloneRoot = localStorage.getItem("cloneRootPath") || "";
@@ -127,7 +138,7 @@ export default function ProjectsPage() {
     localStorage.setItem("cloneRootPath", v);
   }
 
-  async function pullProject(projectPath: string) {
+  async function pullProject(projectPath: string, projectName: string) {
     setPullState((prev) => ({ ...prev, [projectPath]: "pulling" }));
     const res = await fetch("/api/projects/pull", {
       method: "POST",
@@ -135,7 +146,12 @@ export default function ProjectsPage() {
       body: JSON.stringify({ projectPath }),
     }).then((r) => r.json());
     setPullState((prev) => ({ ...prev, [projectPath]: res.success ? "done" : "error" }));
-    if (res.success && sfRootPath) setTimeout(() => scanProjects(sfRootPath), 500);
+    if (res.success) {
+      addToast({ type: "success", title: `Pulled ${projectName}`, message: "Already up to date or fast-forwarded." });
+      if (sfRootPath) setTimeout(() => scanProjects(sfRootPath), 500);
+    } else {
+      addToast({ type: "error", title: `Pull failed — ${projectName}`, message: res.error });
+    }
   }
 
   async function setupProject(projectPath: string, projectName: string) {
@@ -159,9 +175,11 @@ export default function ProjectsPage() {
     if (res.success) {
       setSetupProgress((prev) => ({ ...prev, [projectPath]: 100 }));
       setSetupState((prev) => ({ ...prev, [projectPath]: "done" }));
+      addToast({ type: "success", title: `Installed ${projectName}`, message: "npm install and sourceflow init completed." });
     } else {
       setSetupProgress((prev) => ({ ...prev, [projectPath]: 0 }));
       setSetupState((prev) => ({ ...prev, [projectPath]: "error" }));
+      addToast({ type: "error", title: `Install failed — ${projectName} (${res.step})`, message: res.error });
     }
   }
 
@@ -221,6 +239,7 @@ export default function ProjectsPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-5 py-8">
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {/* Delete confirmation modal */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }}>
@@ -529,7 +548,7 @@ export default function ProjectsPage() {
                 {/* Pull origin */}
                 <button
                   type="button"
-                  onClick={() => pullProject(project.path)}
+                  onClick={() => pullProject(project.path, project.name)}
                   disabled={pullState[project.path] === "pulling"}
                   className="shrink-0 flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md font-semibold cursor-pointer transition-opacity hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{

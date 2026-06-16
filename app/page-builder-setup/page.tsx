@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { LayoutTemplate, Puzzle, RefreshCw, ChevronDown, ChevronRight, Package, FolderOpen, AlertCircle, X, Trash2 } from "lucide-react";
+import { LayoutTemplate, Puzzle, RefreshCw, ChevronDown, ChevronRight, Package, FolderOpen, AlertCircle, X, Trash2, Code2, Layers, FileCode, Box, Zap } from "lucide-react";
 import { FolderPicker } from "@/app/components/FolderPicker";
+import dynamic from "next/dynamic";
+const CodeBlock = dynamic(() => import("@/app/components/CodeBlock"), { ssr: false });
 
 type Tab = "setup" | "components";
+type SetupTab = "installation" | "preview";
 
 type Component = {
   name: string;
@@ -26,12 +29,31 @@ type PBProject = {
 
 export default function PageBuilderSetupPage() {
   const [activeTab, setActiveTab] = useState<Tab>("setup");
+  const [setupTab, setSetupTab] = useState<SetupTab>("installation");
 
   // Page Builder Setup tab state (independent)
   const [setupRootInput, setSetupRootInput] = useState("");
   const [setupRootPath, setSetupRootPath] = useState("");
+  const [setupPkg, setSetupPkg] = useState<{ scripts: Record<string, string>; dependencies: Record<string, string>; devDependencies: Record<string, string> } | null>(null);
   const [setupScanning, setSetupScanning] = useState(false);
   const [setupScanError, setSetupScanError] = useState("");
+  const [setupMissingPackages, setSetupMissingPackages] = useState<{ name: string; version: string }[]>([]);
+  const [setupCheckedPackages, setSetupCheckedPackages] = useState<{ name: string; version: string; installed: boolean }[]>([]);
+  const [installState, setInstallState] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [installProgress, setInstallProgress] = useState(0);
+  const [installError, setInstallError] = useState("");
+  const [installingPkg, setInstallingPkg] = useState("");
+  const [setupFiles, setSetupFiles] = useState<{ key: string; label: string; group: string; exists: boolean; content: string }[]>([]);
+  const [fileExpandedMap, setFileExpandedMap] = useState<Record<string, boolean>>({});
+  const [filePreviewTab, setFilePreviewTab] = useState<Record<string, number>>({});
+  const [scaffoldState, setScaffoldState] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [scaffoldProgress, setScaffoldProgress] = useState(0);
+  const [scaffoldError, setScaffoldError] = useState("");
+  const [scaffoldingFile, setScaffoldingFile] = useState("");
+  const [fileGroupOpen, setFileGroupOpen] = useState<Record<string, boolean>>({ hooks: false, ui: false, pages: false, builder: false });
+  const [previewCodeOpen, setPreviewCodeOpen] = useState(true);
+  const [mergeFoundAt, setMergeFoundAt] = useState("");
+  const [mergeContent, setMergeContent] = useState("");
 
   // Add Components tab state
   const [pbRootInput, setPbRootInput] = useState("");
@@ -59,6 +81,7 @@ export default function PageBuilderSetupPage() {
     const savedSetup = localStorage.getItem("pbSetupRootPath") || "";
     setSetupRootPath(savedSetup);
     setSetupRootInput(savedSetup);
+    if (savedSetup) { checkPackages(savedSetup); readPkg(savedSetup); checkFiles(savedSetup); }
 
     try {
       const savedEntries = localStorage.getItem("pbGeneratedEntries");
@@ -125,23 +148,178 @@ export default function PageBuilderSetupPage() {
     scanProjects(v);
   }
 
-  function saveSetupRoot() {
+  async function checkPackages(projectPath: string) {
+    try {
+      const data = await fetch("/api/page-builder/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath }),
+      }).then((r) => r.json());
+      if (!data.error) {
+        setSetupCheckedPackages(data.packages ?? []);
+        setSetupMissingPackages(data.missing ?? []);
+      }
+    } catch { /* best-effort */ }
+  }
+
+  async function checkFiles(projectPath: string) {
+    try {
+      const data = await fetch("/api/page-builder/check-files", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath }),
+      }).then((r) => r.json());
+      if (!data.error) setSetupFiles(data.files ?? []);
+    } catch { /* best-effort */ }
+  }
+
+  async function readPkg(projectPath: string) {
+    try {
+      const data = await fetch("/api/page-builder/read-pkg", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath }),
+      }).then((r) => r.json());
+      if (!data.error) setSetupPkg(data);
+    } catch { /* best-effort */ }
+  }
+
+  async function saveSetupRoot() {
     const v = setupRootInput.trim().replace(/\/$/, "");
     setSetupRootPath(v);
     localStorage.setItem("pbSetupRootPath", v);
     setSetupScanning(true);
     setSetupScanError("");
-    fetch("/api/page-builder/scan", {
+    setSetupMissingPackages([]);
+    setSetupCheckedPackages([]);
+    setSetupFiles([]);
+    setInstallState("idle");
+    setInstallProgress(0);
+    setInstallError("");
+    setScaffoldState("idle");
+    setScaffoldProgress(0);
+    setScaffoldError("");
+    setMergeFoundAt("");
+    setMergeContent("");
+    try {
+      await Promise.all([checkPackages(v), readPkg(v), checkFiles(v)]);
+    } catch {
+      setSetupScanError("Failed to check project");
+    }
+    setSetupScanning(false);
+  }
+
+  async function installPackages() {
+    setInstallState("running");
+    setInstallProgress(0);
+    setInstallError("");
+    setInstallingPkg(setupMissingPackages[0]?.name ?? "");
+
+    let progress = 0;
+    const pkgs = setupMissingPackages;
+    const ticker = setInterval(() => {
+      progress = Math.min(progress + Math.random() * 5 + 1, 88);
+      setInstallProgress(Math.round(progress));
+      const idx = Math.min(Math.floor((progress / 88) * pkgs.length), pkgs.length - 1);
+      setInstallingPkg(pkgs[idx]?.name ?? "");
+    }, 400);
+
+    const res = await fetch("/api/page-builder/install", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rootPath: v }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        setSetupScanning(false);
-        if (data.error) setSetupScanError(data.error);
-      })
-      .catch(() => { setSetupScanning(false); setSetupScanError("Failed to validate path"); });
+      body: JSON.stringify({ projectPath: setupRootPath, packages: setupMissingPackages }),
+    }).then((r) => r.json());
+
+    clearInterval(ticker);
+
+    if (res.success) {
+      setInstallProgress(100);
+      setInstallState("done");
+      setInstallingPkg("");
+      await readPkg(setupRootPath);
+    } else {
+      setInstallProgress(0);
+      setInstallState("error");
+      setInstallError(res.error ?? "Install failed");
+    }
+  }
+
+  async function scaffoldFiles() {
+    const missing = setupFiles.filter((f) => !f.exists).map((f) => f.key);
+    if (!missing.length) return;
+    setScaffoldState("running");
+    setScaffoldProgress(0);
+    setScaffoldError("");
+
+    const MERGE_KEY = "pages/page-builder-setup/index.js";
+    const templateFiles = missing.filter((k) => k !== MERGE_KEY);
+    const needsMerge = missing.includes(MERGE_KEY);
+
+    let progress = 0;
+    const ticker = setInterval(() => {
+      progress = Math.min(progress + Math.random() * 6 + 1, needsMerge ? 60 : 88);
+      setScaffoldProgress(Math.round(progress));
+    }, 300);
+
+    if (templateFiles.length) {
+      setScaffoldingFile("Installing files…");
+      const res = await fetch("/api/page-builder/scaffold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: setupRootPath, files: templateFiles }),
+      }).then((r) => r.json());
+
+      if (!res.success) {
+        clearInterval(ticker);
+        setScaffoldProgress(0);
+        setScaffoldState("error");
+        setScaffoldingFile("");
+        const failed = (res.results ?? []).filter((r: { success: boolean }) => !r.success).map((r: { key: string; error?: string }) => r.error ?? r.key).join(", ");
+        setScaffoldError(failed || "Scaffold failed");
+        return;
+      }
+    }
+
+    if (needsMerge) {
+      setScaffoldingFile("Generating page-builder-setup/index.js…");
+      const mergeRes = await fetch("/api/page-builder/merge-slug", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: setupRootPath }),
+      }).then((r) => r.json());
+
+      clearInterval(ticker);
+
+      if (mergeRes.success) {
+        setMergeFoundAt(mergeRes.foundAt ?? "");
+        setMergeContent(mergeRes.content ?? "");
+        setScaffoldProgress(100);
+        setScaffoldState("done");
+        setScaffoldingFile("");
+        await checkFiles(setupRootPath);
+      } else {
+        setScaffoldProgress(0);
+        setScaffoldState("error");
+        setScaffoldingFile("");
+        setScaffoldError(mergeRes.error ?? "Page merge failed");
+      }
+    } else {
+      clearInterval(ticker);
+      setScaffoldProgress(100);
+      setScaffoldState("done");
+      setScaffoldingFile("");
+      await checkFiles(setupRootPath);
+    }
+  }
+
+  async function quickInstall() {
+    if (setupMissingPackages.length > 0 && installState !== "done") {
+      await installPackages();
+    }
+    const missingFiles = setupFiles.filter((f) => !f.exists);
+    if (missingFiles.length > 0 && scaffoldState !== "done") {
+      await scaffoldFiles();
+    }
   }
 
   function toggleExpanded(key: string) {
@@ -288,7 +466,8 @@ export default function PageBuilderSetupPage() {
       {activeTab === "setup" && (
         <div className="flex flex-col gap-4">
           <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
-            <div className="text-[11px] text-[#8b949e] mb-1.5">Projects root folder</div>
+
+            <div className="text-[11px] text-[#8b949e] mb-1.5">Project folder</div>
             <div className="flex gap-2 items-center">
               <div
                 className="flex-1 px-3 py-2 rounded-lg text-[12px] truncate"
@@ -326,7 +505,7 @@ export default function PageBuilderSetupPage() {
                 onClick={saveSetupRoot}
                 disabled={!setupRootInput}
                 className="h-9 px-3 rounded-lg text-[12px] font-semibold cursor-pointer transition-opacity hover:opacity-80"
-                style={{ background: "#1f6feb", color: "#fff", opacity: setupRootInput ? 1 : 0.4, cursor: setupRootInput ? "pointer" : "not-allowed" }}
+                style={{ background: "#1f6feb", color: "#fff", opacity: setupRootInput ? 1 : 0.4, cursor: setupRootInput ? "pointer" : "not-allowed", fontWeight: 500 }}
               >
                 Set
               </button>
@@ -337,6 +516,21 @@ export default function PageBuilderSetupPage() {
                     setSetupRootPath("");
                     setSetupRootInput("");
                     setSetupScanError("");
+                    setSetupMissingPackages([]);
+                    setSetupCheckedPackages([]);
+                    setSetupPkg(null);
+                    setSetupFiles([]);
+                    setInstallState("idle");
+                    setInstallProgress(0);
+                    setInstallError("");
+                    setInstallingPkg("");
+                    setScaffoldState("idle");
+                    setScaffoldProgress(0);
+                    setScaffoldError("");
+                    setScaffoldingFile("");
+                    setMergeFoundAt("");
+                    setMergeContent("");
+                    setFileGroupOpen({ hooks: false, ui: false, pages: false, builder: false });
                     localStorage.removeItem("pbSetupRootPath");
                   }}
                   className="h-9 w-9 flex items-center justify-center rounded-lg cursor-pointer transition-opacity hover:opacity-80"
@@ -347,8 +541,414 @@ export default function PageBuilderSetupPage() {
                 </button>
               )}
             </div>
+            {setupScanning && (
+              <div className="flex items-center gap-2 text-[12px] text-[#8b949e] mt-3">
+                <div className="w-2 h-2 rounded-full pulse-dot" style={{ background: "#58a6ff" }} />
+                Checking project...
+              </div>
+            )}
             {setupScanError && <div className="text-[12px] text-[#ef4444] mt-2">{setupScanError}</div>}
+            {!setupScanning && !setupScanError && setupRootPath && setupMissingPackages.length === 0 && setupCheckedPackages.length > 0 && (
+              <div className="flex items-center gap-2 text-[12px] mt-3" style={{ color: "#3fb950" }}>
+                <Package size={13} />
+                All page builder packages are installed.
+              </div>
+            )}
           </div>
+
+          {/* Sub-tab buttons */}
+          {!setupScanning && !setupScanError && setupRootPath && (
+            <div className="flex items-center justify-between">
+              <div className="flex p-1 rounded-lg" style={{ background: "#161b22", border: "1px solid #30363d", width: "fit-content" }}>
+                {(["installation", "preview"] as SetupTab[]).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setSetupTab(tab)}
+                    className="px-4 py-1.5 rounded-md text-[12px] font-semibold cursor-pointer transition-all capitalize"
+                    style={setupTab === tab
+                      ? { background: "#58a6ff18", color: "#58a6ff", border: "1px solid #58a6ff28" }
+                      : { background: "transparent", color: "#8b949e", border: "1px solid transparent" }
+                    }
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+              {setupTab === "installation" && (() => {
+                const isRunning = installState === "running" || scaffoldState === "running";
+                const dataLoaded = setupCheckedPackages.length > 0 && setupFiles.length > 0;
+                const allDone = dataLoaded && (setupMissingPackages.length === 0 || installState === "done") && (setupFiles.every((f) => f.exists) || scaffoldState === "done");
+                return (
+                  <button
+                    type="button"
+                    onClick={quickInstall}
+                    disabled={isRunning || allDone}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-normal cursor-pointer transition-opacity hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{
+                      background: allDone ? "#0d2b1d" : "#58a6ff18",
+                      color: allDone ? "#3fb950" : "#58a6ff",
+                      border: allDone ? "1px solid #3fb95030" : "1px solid #58a6ff28",
+                    }}
+                  >
+                    <Zap size={12} />
+                    {isRunning ? "Installing…" : allDone ? "✓ Done" : "Quick Install"}
+                  </button>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Installation tab */}
+          {!setupScanning && setupCheckedPackages.length > 0 && setupTab === "installation" && (
+            <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
+              {(() => {
+                const allInstalled = setupMissingPackages.length === 0 || installState === "done";
+                const color = allInstalled ? "#3fb950" : "#d29922";
+                return (
+                  <div className="flex items-center gap-2 mb-3">
+                    <Package size={13} style={{ color }} />
+                    <span className="text-[11px] uppercase tracking-widest transition-colors duration-500" style={{ color }}>Package Setup</span>
+                    {!allInstalled && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#1a1206", color: "#d29922" }}>
+                        {setupMissingPackages.length} missing
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+              <div className="flex flex-col gap-1.5">
+                {setupCheckedPackages.map((pkg) => {
+                  const isInstalled = pkg.installed || installState === "done";
+                  return (
+                    <div
+                      key={pkg.name}
+                      className="flex items-center justify-between px-2 py-2 rounded-lg"
+                      style={{ background: "#0d1117", border: "1px solid #21262d" }}
+                    >
+                      <span className="text-[12px] font-mono" style={{ color: "#e6edf3" }}>{pkg.name}</span>
+                      <span
+                        className="text-[11px] font-mono px-2 py-0.5 rounded-md transition-all duration-500"
+                        style={isInstalled
+                          ? { background: "#0d2b1d", color: "#3fb950", border: "1px solid #3fb95030" }
+                          : { background: "#1a1206", color: "#d29922", border: "1px solid #d2992230" }
+                        }
+                      >
+                        {pkg.version}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              {installError && (
+                <div className="mt-3 text-[11px] font-mono text-[#f85149] whitespace-pre-wrap break-words">{installError}</div>
+              )}
+              <div className="flex items-center justify-between mt-4">
+                <div className="text-[9px] font-mono truncate mr-3" style={{ color: "#8b949e", minHeight: "1.25rem" }}>
+                  {installState === "running" && installingPkg && (
+                    <span>Installing <span style={{ color: "#e6edf3" }}>{installingPkg}</span>…</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={installPackages}
+                  disabled={installState === "running" || installState === "done" || setupMissingPackages.length === 0}
+                  className="relative overflow-hidden px-4 py-2 rounded-lg text-[12px] font-semibold cursor-pointer transition-opacity hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    background: installState === "done" ? "#0d2b1d" : installState === "error" ? "#2b0d0d" : "#1f6feb",
+                    color: installState === "done" ? "#3fb950" : installState === "error" ? "#f85149" : "#fff",
+                    width: "70px",
+                    fontWeight: 500,
+                  }}
+                >
+                  {installState === "running" && (
+                    <span
+                      className="absolute inset-0 transition-all duration-300"
+                      style={{ width: `${installProgress}%`, background: "#ffffff20" }}
+                    />
+                  )}
+                  <span className="relative z-10">
+                    {installState === "running"
+                      ? `Installing ${installProgress}%`
+                      : installState === "done"
+                      ? "✓ Installed"
+                      : installState === "error"
+                      ? "Retry"
+                      : "Install"}
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* File Setup section */}
+          {!setupScanning && setupFiles.length > 0 && setupTab === "installation" && (
+            <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
+              {(() => {
+                const allExist = setupFiles.every((f) => f.exists) || scaffoldState === "done";
+                const color = allExist ? "#3fb950" : "#d29922";
+                const missingCount = setupFiles.filter((f) => !f.exists).length;
+                return (
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                    </svg>
+                    <span className="text-[11px] uppercase tracking-widest transition-colors duration-500" style={{ color }}>File Setup</span>
+                    {!allExist && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#1a1206", color: "#d29922" }}>
+                        {missingCount} missing
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {(["hooks", "ui", "pages", "builder"] as const).map((group) => {
+                const groupFiles = setupFiles.filter((f) => f.group === group);
+                if (!groupFiles.length) return null;
+                const isOpen = fileGroupOpen[group] ?? false;
+                const groupMissing = groupFiles.filter((f) => !f.exists && scaffoldState !== "done").length;
+                return (
+                  <div key={group} className="mb-2 last:mb-0 rounded-lg overflow-hidden" style={{ border: "1px solid #21262d" }}>
+                    <button
+                      type="button"
+                      onClick={() => setFileGroupOpen((prev) => ({ ...prev, [group]: !prev[group] }))}
+                      className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#161b22] transition-colors"
+                      style={{ background: "#0d1117" }}
+                    >
+                      <span className="flex-1 text-left text-[11px] font-mono" style={{ color: "#8b949e" }}>{group}/</span>
+                      {groupMissing > 0 && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#1a1206", color: "#d29922" }}>
+                          {groupMissing} missing
+                        </span>
+                      )}
+                      {isOpen ? <ChevronDown size={12} color="#555" /> : <ChevronRight size={12} color="#555" />}
+                    </button>
+                    {isOpen && (
+                      <div className="flex flex-col gap-1 p-2" style={{ background: "#0d1117", borderTop: "1px solid #21262d" }}>
+                        {groupFiles.map((f, fi) => {
+                          const isOk = f.exists || scaffoldState === "done";
+                          return (
+                            <div
+                              key={f.key}
+                              className="flex items-center justify-between px-2 py-1.5"
+                              style={{ borderBottom: fi < groupFiles.length - 1 ? "1px solid #21262d" : "none" }}
+                            >
+                              <span className="text-[12px] font-mono" style={{ color: "#e6edf3" }}>{f.label}</span>
+                              <span
+                                className="text-[10px] font-mono px-2 py-0.5 rounded-md transition-all duration-500"
+                                style={isOk
+                                  ? { background: "#0d2b1d", color: "#3fb950", border: "1px solid #3fb95030" }
+                                  : { background: "#1a1206", color: "#d29922", border: "1px solid #d2992230" }
+                                }
+                              >
+                                {isOk ? "exists" : "missing"}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {scaffoldError && (
+                <div className="mt-3 text-[11px] font-mono text-[#f85149] whitespace-pre-wrap break-words">{scaffoldError}</div>
+              )}
+
+              <div className="flex items-center justify-between mt-4">
+                <div className="text-[9px] font-mono truncate mr-3" style={{ color: "#8b949e", minHeight: "1.25rem" }}>
+                  {scaffoldState === "running" && scaffoldingFile && (
+                    <span>Installing <span style={{ color: "#e6edf3" }}>{scaffoldingFile}</span></span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={scaffoldFiles}
+                  disabled={scaffoldState === "running" || scaffoldState === "done" || setupFiles.every((f) => f.exists)}
+                  className="relative overflow-hidden px-4 py-2 rounded-lg text-[12px] font-semibold cursor-pointer transition-opacity hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    background: scaffoldState === "done" ? "#0d2b1d" : scaffoldState === "error" ? "#2b0d0d" : "#1f6feb",
+                    color: scaffoldState === "done" ? "#3fb950" : scaffoldState === "error" ? "#f85149" : "#fff",
+                    width: "70px",
+                    fontWeight: 500,
+                  }}
+                >
+                  {scaffoldState === "running" && (
+                    <span
+                      className="absolute inset-0 transition-all duration-300"
+                      style={{ width: `${scaffoldProgress}%`, background: "#ffffff20" }}
+                    />
+                  )}
+                  <span className="relative z-10">
+                    {scaffoldState === "running"
+                      ? `Installing ${scaffoldProgress}%`
+                      : scaffoldState === "done"
+                      ? "✓ Installed"
+                      : scaffoldState === "error"
+                      ? "Retry"
+                      : "Install"}
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Preview tab */}
+          {!setupScanning && setupRootPath && setupTab === "preview" && (
+            <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
+              {/* Section header */}
+              {(() => {
+                const allInstalled = setupMissingPackages.length === 0 || installState === "done";
+                const color = allInstalled ? "#3fb950" : "#d29922";
+                return (
+                  <div className="flex items-center gap-2 mb-3">
+                    <Package size={13} style={{ color }} />
+                    <span className="text-[11px] uppercase tracking-widest" style={{ color }}>Package Setup</span>
+                  </div>
+                );
+              })()}
+
+              {!setupPkg ? (
+                <div className="text-[12px] text-[#484f58]">No package.json data — set a project folder first.</div>
+              ) : (
+                <div className="rounded-lg overflow-hidden" style={{ border: "1px solid #30363d" }}>
+                  {/* File header */}
+                  <button
+                    type="button"
+                    onClick={() => setPreviewCodeOpen((v) => !v)}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 cursor-pointer hover:opacity-80 transition-opacity"
+                    style={{ borderBottom: previewCodeOpen ? "1px solid #30363d" : "none", background: "#0d1117" }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b949e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                    <span className="flex-1 text-left text-[12px] font-mono text-[#8b949e]">package.json</span>
+                    {previewCodeOpen ? <ChevronDown size={13} color="#555" /> : <ChevronRight size={13} color="#555" />}
+                  </button>
+                {previewCodeOpen && (() => {
+                  const PB_SCRIPTS = ["sfprepare", "postbuild"];
+                  const PB_PKGS = [
+                    "@sourceflow-uk/page-builder-cli",
+                    "@sourceflow-uk/eslint-plugin-page-builder-cli",
+                    "@sourceflow-uk/sourceflow-content",
+                    "@sourceflow-uk/sourceflow-sdk",
+                    "aos",
+                  ];
+                  const allDeps = { ...setupPkg.dependencies, ...setupPkg.devDependencies };
+                  const pbDeps = Object.fromEntries(Object.entries(allDeps).filter(([k]) => PB_PKGS.includes(k)));
+                  const snippet = JSON.stringify(
+                    {
+                      scripts: setupPkg.scripts,
+                      ...(Object.keys(pbDeps).length ? { dependencies: pbDeps } : {}),
+                    },
+                    null,
+                    2
+                  );
+                  const highlightKeys = [
+                    ...Object.keys(setupPkg.scripts).filter((k) => PB_SCRIPTS.includes(k) || setupPkg.scripts[k].includes("sfprepare")),
+                    ...Object.keys(pbDeps),
+                  ];
+                  return (
+                    <div style={{ background: "#0d1117" }}>
+                      <CodeBlock code={snippet} language="json" highlightLines={highlightKeys} />
+                    </div>
+                  );
+                })()}
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* File Setup preview — separate card */}
+          {!setupScanning && setupRootPath && setupTab === "preview" && setupFiles.length > 0 && (() => {
+            const existingFiles = setupFiles.filter((f) => f.exists || scaffoldState === "done");
+            if (existingFiles.length === 0) return null;
+
+            // Group: "hooks" + "ui" + "pages" each as one entry with all files as tabs
+            const groups: { key: string; label: string; files: typeof existingFiles }[] = [];
+            const hooksFiles = existingFiles.filter((f) => f.group === "hooks");
+            if (hooksFiles.length) groups.push({ key: "hooks", label: "hooks", files: hooksFiles });
+            const uiFiles = existingFiles.filter((f) => f.group === "ui");
+            if (uiFiles.length) groups.push({ key: "ui", label: "ui", files: uiFiles });
+            const pagesFiles = existingFiles
+              .filter((f) => f.group === "pages")
+              .map((f) => f.key === "pages/page-builder-setup/index.js" && mergeContent ? { ...f, content: mergeContent } : f);
+            if (pagesFiles.length) groups.push({ key: "pages", label: "pages", files: pagesFiles });
+            const builderFiles = existingFiles.filter((f) => f.group === "builder");
+            if (builderFiles.length) groups.push({ key: "builder", label: "builder", files: builderFiles });
+
+            return (
+              <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
+                <div className="flex items-center gap-2 mb-3">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3fb950" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <span className="text-[11px] uppercase tracking-widest" style={{ color: "#3fb950" }}>File Setup</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#0d2b1d", color: "#3fb950" }}>
+                    {existingFiles.length}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {groups.map((group) => {
+                    const isOpen = fileExpandedMap[group.key] ?? false;
+                    const tabIdx = filePreviewTab[group.key] ?? 0;
+                    const activeFile = group.files[tabIdx];
+                    return (
+                      <div key={group.key} className="rounded-lg overflow-hidden" style={{ background: "#0d1117", border: "1px solid #21262d" }}>
+                        <button
+                          type="button"
+                          onClick={() => setFileExpandedMap((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-[#161b22] transition-colors"
+                        >
+                          {group.key === "hooks"
+                            ? <Code2 size={13} color="#8b949e" style={{ flexShrink: 0 }} />
+                            : group.key === "ui"
+                            ? <Layers size={13} color="#8b949e" style={{ flexShrink: 0 }} />
+                            : group.key === "pages"
+                            ? <FileCode size={13} color="#8b949e" style={{ flexShrink: 0 }} />
+                            : <Box size={13} color="#8b949e" style={{ flexShrink: 0 }} />
+                          }
+                          <span className="flex-1 text-left text-[12px] font-mono text-[#8b949e]">{group.label}</span>
+                          {isOpen ? <ChevronDown size={13} color="#555" /> : <ChevronRight size={13} color="#555" />}
+                        </button>
+                        {isOpen && (
+                          <div style={{ background: "#0d1117" }}>
+                            <div className="flex border-b border-t overflow-x-auto" style={{ borderColor: "#21262d", scrollbarWidth: "none" }}>
+                              {group.files.map((f, i) => (
+                                <button
+                                  key={f.key}
+                                  type="button"
+                                  onClick={() => setFilePreviewTab((prev) => ({ ...prev, [group.key]: i }))}
+                                  className="shrink-0 px-3 py-1.5 text-[11px] font-mono cursor-pointer transition-colors"
+                                  style={{
+                                    color: tabIdx === i ? "#e6edf3" : "#8b949e",
+                                    borderBottom: tabIdx === i ? "2px solid #3fb950" : "2px solid transparent",
+                                    background: "transparent",
+                                  }}
+                                >
+                                  {f.label}
+                                </button>
+                              ))}
+                            </div>
+                            <div style={{ maxHeight: "320px", overflowY: "auto", background: "#0d1117" }}>
+                              <CodeBlock
+                                code={activeFile?.content ?? ""}
+                                language={activeFile?.key.endsWith(".ts") || activeFile?.key.endsWith(".tsx") ? "typescript" : "javascript"}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -396,7 +996,7 @@ export default function PageBuilderSetupPage() {
                   onClick={saveRoot}
                   disabled={!pbRootInput}
                   className="h-9 px-3 rounded-lg text-[12px] font-semibold cursor-pointer transition-opacity hover:opacity-80"
-                  style={{ background: "#1f6feb", color: "#fff", opacity: pbRootInput ? 1 : 0.4, cursor: pbRootInput ? "pointer" : "not-allowed" }}
+                  style={{ background: "#1f6feb", color: "#fff", opacity: pbRootInput ? 1 : 0.4, cursor: pbRootInput ? "pointer" : "not-allowed", fontWeight: 500 }}
                 >
                   Set
                 </button>
@@ -608,83 +1208,6 @@ export default function PageBuilderSetupPage() {
             </div>
           )}
 
-          {/* Generated Component — standalone card, persists after rescan */}
-          {(() => {
-            const entries = Object.values(generatedEntries);
-            if (entries.length === 0) return null;
-            return (
-              <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-[11px] uppercase tracking-widest text-[#3fb950]">Generated Components</span>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#0d2b1d", color: "#3fb950" }}>
-                    {entries.length}
-                  </span>
-                </div>
-                <div className="flex flex-col gap-2">
-                  {entries.map((entry) => {
-                    const key = `${entry.projectPath}::${entry.compName}`;
-                    const isOpen = generatedExpanded[key] ?? false;
-                    const tabIdx = generatedFileTab[key] ?? 0;
-                    const activeFile = entry.files[tabIdx];
-                    return (
-                      <div key={key} className="rounded-lg overflow-hidden" style={{ background: "#0d1117", border: "1px solid #21262d" }}>
-                        <div className="flex items-center">
-                          <button
-                            type="button"
-                            onClick={() => setGeneratedExpanded((prev) => ({ ...prev, [key]: !isOpen }))}
-                            className="flex-1 flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-[#161b22] transition-colors min-w-0"
-                          >
-                            <div className="flex-1 min-w-0 text-left">
-                              <div className="text-[13px] font-semibold text-[#e6edf3] truncate">{entry.compName}</div>
-                            </div>
-                            {isOpen ? <ChevronDown size={13} color="#555" /> : <ChevronRight size={13} color="#555" />}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteGeneratedTarget(key)}
-                            className="p-2.5 mr-1 rounded-md cursor-pointer transition-opacity hover:opacity-80"
-                            style={{ color: "#f85149" }}
-                            title="Remove"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-
-                        {isOpen && (
-                          <div style={{ background: "#0d1117" }}>
-                            <div className="flex border-b border-t" style={{ borderColor: "#21262d" }}>
-                              {entry.files.map((file, i) => (
-                                <button
-                                  key={file.name}
-                                  type="button"
-                                  onClick={() => setGeneratedFileTab((prev) => ({ ...prev, [key]: i }))}
-                                  className="px-3 py-1.5 text-[11px] font-mono cursor-pointer transition-colors"
-                                  style={{
-                                    color: tabIdx === i ? "#e6edf3" : "#8b949e",
-                                    borderBottom: tabIdx === i ? "2px solid #3fb950" : "2px solid transparent",
-                                    background: "transparent",
-                                  }}
-                                >
-                                  {file.name}
-                                </button>
-                              ))}
-                            </div>
-                            <pre
-                              className="text-[11px] font-mono leading-relaxed overflow-x-auto"
-                              style={{ padding: "12px 14px", color: "#c9d1d9", margin: 0, maxHeight: "400px", overflowY: "auto" }}
-                            >
-                              {activeFile?.content}
-                            </pre>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })()}
-
           {/* Non-Page Builder Components */}
           {!scanning && !scanError && setupProjects.length > 0 && (
             <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
@@ -791,7 +1314,7 @@ export default function PageBuilderSetupPage() {
                                   onClick={() => !isAnyRunning && count > 0 && generateAll(project.path)}
                                   disabled={count === 0 || isAnyRunning}
                                   className="relative overflow-hidden shrink-0 px-3 py-2 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
-                                  style={{ background: "#1f6feb", color: "#fff", cursor: count > 0 ? "pointer" : "not-allowed", minWidth: "120px" }}
+                                  style={{ background: "#1f6feb", color: "#fff", cursor: count > 0 ? "pointer" : "not-allowed", minWidth: "120px", fontWeight: 500 }}
                                 >
                                   {isAnyRunning && (
                                     <span
@@ -822,6 +1345,83 @@ export default function PageBuilderSetupPage() {
 
             </div>
           )}
+
+          {/* Generated Component — standalone card, persists after rescan */}
+          {(() => {
+            const entries = Object.values(generatedEntries);
+            if (entries.length === 0) return null;
+            return (
+              <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[11px] uppercase tracking-widest text-[#3fb950]">Generated Components</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#0d2b1d", color: "#3fb950" }}>
+                    {entries.length}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {entries.map((entry) => {
+                    const key = `${entry.projectPath}::${entry.compName}`;
+                    const isOpen = generatedExpanded[key] ?? false;
+                    const tabIdx = generatedFileTab[key] ?? 0;
+                    const activeFile = entry.files[tabIdx];
+                    return (
+                      <div key={key} className="rounded-lg overflow-hidden" style={{ background: "#0d1117", border: "1px solid #21262d" }}>
+                        <div className="flex items-center">
+                          <button
+                            type="button"
+                            onClick={() => setGeneratedExpanded((prev) => ({ ...prev, [key]: !isOpen }))}
+                            className="flex-1 flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-[#161b22] transition-colors min-w-0"
+                          >
+                            <div className="flex-1 min-w-0 text-left">
+                              <div className="text-[13px] font-semibold text-[#e6edf3] truncate">{entry.compName}</div>
+                            </div>
+                            {isOpen ? <ChevronDown size={13} color="#555" /> : <ChevronRight size={13} color="#555" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteGeneratedTarget(key)}
+                            className="p-2.5 mr-1 rounded-md cursor-pointer transition-opacity hover:opacity-80"
+                            style={{ color: "#f85149" }}
+                            title="Remove"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+
+                        {isOpen && (
+                          <div style={{ background: "#0d1117" }}>
+                            <div className="flex border-b border-t" style={{ borderColor: "#21262d" }}>
+                              {entry.files.map((file, i) => (
+                                <button
+                                  key={file.name}
+                                  type="button"
+                                  onClick={() => setGeneratedFileTab((prev) => ({ ...prev, [key]: i }))}
+                                  className="px-3 py-1.5 text-[11px] font-mono cursor-pointer transition-colors"
+                                  style={{
+                                    color: tabIdx === i ? "#e6edf3" : "#8b949e",
+                                    borderBottom: tabIdx === i ? "2px solid #3fb950" : "2px solid transparent",
+                                    background: "transparent",
+                                  }}
+                                >
+                                  {file.name}
+                                </button>
+                              ))}
+                            </div>
+                            <pre
+                              className="text-[11px] font-mono leading-relaxed overflow-x-auto"
+                              style={{ padding: "12px 14px", color: "#c9d1d9", margin: 0, maxHeight: "400px", overflowY: "auto" }}
+                            >
+                              {activeFile?.content}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>

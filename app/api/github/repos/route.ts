@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 
+let cache: { data: unknown; expiresAt: number } | null = null;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 type RawRepo = {
   id: number;
   name: string;
@@ -40,6 +43,10 @@ export async function GET() {
     "X-GitHub-Api-Version": "2022-11-28",
   };
 
+  if (cache && Date.now() < cache.expiresAt) {
+    return NextResponse.json(cache.data);
+  }
+
   try {
     const [userRepos, orgs] = await Promise.all([
       fetchAllPages<RawRepo>("https://api.github.com/user/repos?per_page=100&sort=updated&type=owner", headers),
@@ -59,7 +66,9 @@ export async function GET() {
     const seen = new Set(personal.map((r) => r.full_name));
     const deduped = orgRepos.filter((r) => !seen.has(r.full_name));
 
-    return NextResponse.json({ repos: [...personal, ...deduped] });
+    const payload = { repos: [...personal, ...deduped] };
+    cache = { data: payload, expiresAt: Date.now() + CACHE_TTL_MS };
+    return NextResponse.json(payload);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: msg }, { status: 500 });

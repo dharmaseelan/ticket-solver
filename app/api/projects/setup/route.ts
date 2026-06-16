@@ -27,18 +27,22 @@ export async function POST(req: NextRequest) {
     NODE_AUTH_TOKEN: getNpmAuthToken(),
   };
 
+  function extractError(e: unknown): string {
+    const stderr = (e as { stderr?: Buffer }).stderr?.toString().trim() ?? "";
+    const stdout = (e as { stdout?: Buffer }).stdout?.toString().trim() ?? "";
+    return stderr || stdout || (e instanceof Error ? e.message : String(e));
+  }
+
   try {
     execSync("npm install", { cwd: projectPath, timeout: 180000, shell: "/bin/zsh", env });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ success: false, step: "npm install", error: msg });
+    return NextResponse.json({ success: false, step: "npm install", error: extractError(e) });
   }
 
   try {
     execSync(`npx sourceflow init ${projectName}`, { cwd: projectPath, timeout: 60000, shell: "/bin/zsh", env });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ success: false, step: "sourceflow init", error: msg });
+    return NextResponse.json({ success: false, step: "sourceflow init", error: extractError(e) });
   }
 
   return NextResponse.json({ success: true });
