@@ -2,9 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
+function findProjectRoot(dir: string): string {
+  if (fs.existsSync(path.join(dir, "package.json"))) return dir;
+  const parent = path.dirname(dir);
+  if (parent === dir) return dir;
+  return findProjectRoot(parent);
+}
+
 function getBuilderPath(projectPath: string): string | null {
-  if (fs.existsSync(path.join(projectPath, "src", "builder"))) return path.join(projectPath, "src", "builder");
-  if (fs.existsSync(path.join(projectPath, "builder"))) return path.join(projectPath, "builder");
+  const root = findProjectRoot(projectPath);
+  if (fs.existsSync(path.join(root, "src", "builder"))) return path.join(root, "src", "builder");
+  if (fs.existsSync(path.join(root, "builder"))) return path.join(root, "builder");
   return null;
 }
 

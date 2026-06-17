@@ -68,7 +68,7 @@ export function Sidebar() {
             <Image src="/SF_SYMBOL_MONO_WHITE.png" alt="Logo" width={26} height={26} className="shrink-0" style={{ width: "26px", height: "26px", opacity: 0.9 }} />
             <div className="min-w-0">
               <div className="font-bold leading-tight truncate" style={{ color: "#ffffff", fontSize: 15, textTransform: "uppercase", letterSpacing: "1.5px", opacity: 0.9, marginLeft: "-3px" }}>
-                Revive
+                Sentry
               </div>
             </div>
           </Link>

@@ -16,9 +16,10 @@ type Props = {
   code: string;
   language?: string;
   highlightLines?: string[]; // substrings — lines containing any of these get a green bg
+  addedLines?: Set<number>;  // line numbers (1-based) to highlight as added (green)
 };
 
-export default function CodeBlock({ code, language = "javascript", highlightLines = [] }: Props) {
+export default function CodeBlock({ code, language = "javascript", highlightLines = [], addedLines }: Props) {
   const lines = code.split("\n");
 
   const isHighlighted = (line: string) =>
@@ -31,6 +32,9 @@ export default function CodeBlock({ code, language = "javascript", highlightLine
       showLineNumbers
       wrapLines
       lineProps={(lineNumber) => {
+        if (addedLines?.has(lineNumber)) {
+          return { style: { display: "block", background: "#0d2b1d" } };
+        }
         const line = lines[lineNumber - 1] ?? "";
         return isHighlighted(line)
           ? { style: { display: "block", background: "#0d2b1d60" } }

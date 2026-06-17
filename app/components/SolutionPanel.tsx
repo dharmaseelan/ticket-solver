@@ -1,8 +1,19 @@
 "use client";
 import { ProjectResult } from "@/app/types";
-import { useState } from "react";
-import { Copy, Check, FileCode, ArrowLeft, ChevronDown, ChevronRight, FolderOpen } from "lucide-react";
+import { useState, useRef } from "react";
+import { Copy, Check, ArrowLeft, ChevronDown, ChevronRight, FolderOpen } from "lucide-react";
 import { computeDiff } from "@/app/lib/diff";
+import dynamic from "next/dynamic";
+const CodeBlock = dynamic(() => import("@/app/components/CodeBlock"), { ssr: false });
+
+function getLang(filePath: string): string {
+  const ext = filePath.split(".").pop() ?? "";
+  if (ext === "ts" || ext === "tsx") return "typescript";
+  if (ext === "scss" || ext === "css") return "scss";
+  if (ext === "json") return "json";
+  if (ext === "mjs" || ext === "js" || ext === "jsx") return "javascript";
+  return "javascript";
+}
 
 interface SolutionPanelProps {
   projects: ProjectResult[];
@@ -14,12 +25,33 @@ interface SolutionPanelProps {
 
 type SaveState = "idle" | "saved" | "error";
 
+const FILE_ICON = (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+  </svg>
+);
+
+const FOLDER_ICON = (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
+    <path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" />
+  </svg>
+);
+
 export function SolutionPanel({ projects, ticketSubject, ticketRequest, godfatherNote, onBack }: SolutionPanelProps) {
   const [copied, setCopied] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [projectExpanded, setProjectExpanded] = useState<Record<number, boolean>>(
     () => Object.fromEntries(projects.map((_, i) => [i, true]))
   );
+  const [selectedFile, setSelectedFile] = useState<Record<number, number>>(
+    () => Object.fromEntries(projects.map((_, i) => [i, 0]))
+  );
+  const [treeDirOpen, setTreeDirOpen] = useState<Record<string, boolean>>({});
+  const [treeWidth, setTreeWidth] = useState(200);
+  const [handleHover, setHandleHover] = useState(false);
+  const resizing = useRef(false);
+  const resizeStartX = useRef(0);
+  const resizeStartW = useRef(0);
   const [saveState, setSaveState] = useState<SaveState>("idle");
 
   const multiProject = projects.length > 1;
@@ -29,10 +61,6 @@ export function SolutionPanel({ projects, ticketSubject, ticketRequest, godfathe
       setCopied(key);
       setTimeout(() => setCopied(null), 2000);
     });
-  }
-
-  function toggleExpand(key: string) {
-    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
   async function saveToHistory() {
@@ -67,7 +95,15 @@ export function SolutionPanel({ projects, ticketSubject, ticketRequest, godfathe
   }
 
   return (
-    <div className="animate-fade-in">
+    <div
+      className="animate-fade-in"
+      onMouseMove={(e) => {
+        if (!resizing.current) return;
+        const delta = e.clientX - resizeStartX.current;
+        setTreeWidth(Math.max(120, Math.min(320, resizeStartW.current + delta)));
+      }}
+      onMouseUp={() => { resizing.current = false; setHandleHover(false); }}
+    >
       {/* Header */}
       <div className="flex items-center gap-3 mb-4">
         <button
@@ -82,14 +118,24 @@ export function SolutionPanel({ projects, ticketSubject, ticketRequest, godfathe
       <div className="text-[11px] text-[#8b949e] uppercase tracking-widest mb-1">Fix for</div>
       <div className="text-[15px] font-bold text-[#f0f0f0] mb-5">{ticketSubject}</div>
 
-      {/* Per-project sections */}
       {projects.map((project, pi) => {
         const { projectPath, solution } = project;
         const projectName = projectPath.split("/").pop() || projectPath;
+        const selIdx = selectedFile[pi] ?? 0;
+        const selFile = solution.files?.[selIdx];
+
+        // Build folder tree from file paths
+        const dirs: Record<string, { file: typeof solution.files[0]; globalIdx: number }[]> = {};
+        (solution.files ?? []).forEach((file, fi) => {
+          const parts = file.path.split("/");
+          const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+          if (!dirs[dir]) dirs[dir] = [];
+          dirs[dir].push({ file, globalIdx: fi });
+        });
 
         return (
           <div key={pi} className={multiProject ? "mb-6" : ""}>
-            {/* Project header — only shown for multi-project */}
+            {/* Project header */}
             {multiProject && (
               <button
                 type="button"
@@ -100,16 +146,10 @@ export function SolutionPanel({ projects, ticketSubject, ticketRequest, godfathe
                 <FolderOpen size={13} style={{ color: "#58a6ff" }} />
                 <span className="text-[13px] font-semibold text-white">{projectName}</span>
                 <span className="text-[11px] text-[#8b949e] font-mono truncate">{projectPath}</span>
-                <span
-                  className="ml-auto text-[11px] px-2 py-0.5 rounded shrink-0"
-                  style={{ background: "#0d1f38", color: "#58a6ff", border: "1px solid #58a6ff20" }}
-                >
+                <span className="ml-auto text-[11px] px-2 py-0.5 rounded shrink-0" style={{ background: "#0d1f38", color: "#58a6ff", border: "1px solid #58a6ff20" }}>
                   {pi + 1}/{projects.length}
                 </span>
-                {projectExpanded[pi]
-                  ? <ChevronDown size={14} color="#555" className="shrink-0" />
-                  : <ChevronRight size={14} color="#555" className="shrink-0" />
-                }
+                {projectExpanded[pi] ? <ChevronDown size={14} color="#555" className="shrink-0" /> : <ChevronRight size={14} color="#555" className="shrink-0" />}
               </button>
             )}
 
@@ -156,122 +196,118 @@ export function SolutionPanel({ projects, ticketSubject, ticketRequest, godfathe
               </div>
             )}
 
-            {/* Files */}
-            {(!multiProject || projectExpanded[pi]) && solution.files?.map((file, fi) => {
-              const key = `${pi}-${fi}`;
-              const diff = file.originalContent
-                ? computeDiff(file.originalContent, file.content)
-                : null;
-
-              const addedCount = diff?.filter((l) => l.type === "added").length ?? 0;
-              const removedCount = diff?.filter((l) => l.type === "removed").length ?? 0;
-              const isOpen = expanded[key] ?? false;
-
-              return (
-                <div
-                  key={key}
-                  className="mb-3 rounded-xl overflow-hidden animate-fade-in"
-                  style={{ border: "1px solid #30363d" }}
-                >
-                  {/* File header */}
-                  <button
-                    type="button"
-                    onClick={() => toggleExpand(key)}
-                    className="w-full flex items-center justify-between px-4 py-3 text-left transition-colors hover:bg-[#21262d] cursor-pointer"
-                    style={{ background: "#161b22" }}
-                  >
-                    <div className="flex items-center gap-2 text-[12px] font-mono truncate">
-                      <FileCode size={12} className="shrink-0" style={{ color: "#58a6ff" }} />
-                      <span className="text-white font-semibold">{file.path.split("/").pop()}</span>
-                      <span className="text-[#8b949e] truncate">{file.path}</span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0 ml-2">
-                      {diff && (
-                        <span className="flex items-center gap-1.5 text-[11px]">
-                          {addedCount > 0 && <span style={{ color: "#58a6ff" }}>+{addedCount}</span>}
-                          {removedCount > 0 && <span style={{ color: "#ef4444" }}>-{removedCount}</span>}
-                        </span>
-                      )}
-                      <span
-                        onClick={(e) => { e.stopPropagation(); copyToClipboard(file.content, key); }}
-                        className="flex items-center gap-1 text-[11px] px-2 py-1 rounded transition-colors cursor-pointer"
-                        style={{
-                          background: copied === key ? "#58a6ff20" : "#21262d",
-                          color: copied === key ? "#58a6ff" : "#666",
-                        }}
-                      >
-                        {copied === key ? <Check size={10} /> : <Copy size={10} />}
-                        {copied === key ? "Copied!" : "Copy"}
-                      </span>
-                      {isOpen
-                        ? <ChevronDown size={14} color="#555" />
-                        : <ChevronRight size={14} color="#555" />
-                      }
-                    </div>
-                  </button>
-
-                  {/* Diff / code view */}
-                  {isOpen && (
-                    <div
-                      className="overflow-x-auto overflow-y-auto font-mono text-[12px] leading-relaxed"
-                      style={{ background: "#0d1117", maxHeight: 480 }}
-                    >
-                      {diff ? (
-                        <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed" }}>
-                          <tbody>
-                            {diff.map((line, li) => {
-                              const isAdded = line.type === "added";
-                              const isRemoved = line.type === "removed";
-                              return (
-                                <tr
-                                  key={li}
-                                  style={{
-                                    background: isAdded ? "#0d1f38" : isRemoved ? "#2b0d0d" : "transparent",
-                                  }}
-                                >
-                                  <td
-                                    style={{
-                                      width: 16,
-                                      padding: "0 8px",
-                                      userSelect: "none",
-                                      color: isAdded ? "#58a6ff" : isRemoved ? "#ef4444" : "#333",
-                                      fontWeight: "bold",
-                                    }}
-                                  >
-                                    {isAdded ? "+" : isRemoved ? "−" : " "}
-                                  </td>
-                                  <td
-                                    style={{
-                                      padding: "1px 12px 1px 4px",
-                                      color: isAdded ? "#f5cdb0" : isRemoved ? "#f0a8a8" : "#666",
-                                      whiteSpace: "pre",
-                                    }}
-                                  >
-                                    {line.content}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      ) : (
-                        <pre className="m-0 p-4" style={{ color: "#f5cdb0" }}>
-                          {file.content}
-                        </pre>
-                      )}
-                    </div>
-                  )}
+            {/* Files — split panel */}
+            {(!multiProject || projectExpanded[pi]) && solution.files?.length > 0 && (
+              <div className="mb-3 rounded-xl overflow-hidden" style={{ border: "1px solid #30363d", height: "400px", display: "flex" }}>
+                {/* Left: folder tree */}
+                <div style={{ width: `${treeWidth}px`, flexShrink: 0, overflowY: "auto", overflowX: "hidden", background: "#0d1117", borderRight: "1px solid #21262d" }}>
+                  {Object.entries(dirs).map(([dir, items]) => {
+                    const dirKey = `${pi}-${dir}`;
+                    const isDirOpen = treeDirOpen[dirKey] ?? true;
+                    return (
+                      <div key={dir}>
+                        {dir && (
+                          <button
+                            type="button"
+                            onClick={() => setTreeDirOpen((prev) => ({ ...prev, [dirKey]: !isDirOpen }))}
+                            className="w-full flex items-center gap-1.5 px-3 py-1.5 cursor-pointer hover:bg-[#1c2128] transition-colors"
+                            style={{ color: "#6e7681" }}
+                          >
+                            {isDirOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                            {FOLDER_ICON}
+                            <span className="text-[10px] font-mono truncate">{dir}</span>
+                          </button>
+                        )}
+                        {(!dir || isDirOpen) && items.map(({ file, globalIdx }) => {
+                          const isSel = globalIdx === selIdx;
+                          const filename = file.path.split("/").pop() ?? file.path;
+                          return (
+                            <button
+                              key={globalIdx}
+                              type="button"
+                              onClick={() => setSelectedFile((prev) => ({ ...prev, [pi]: globalIdx }))}
+                              className="w-full flex items-center gap-1.5 pr-3 py-1 cursor-pointer transition-colors text-left hover:bg-[#1c2128]"
+                              style={{
+                                paddingLeft: dir ? "28px" : "12px",
+                                background: isSel ? "#21262d" : undefined,
+                                color: isSel ? "#e6edf3" : "#8b949e",
+                              }}
+                            >
+                              {FILE_ICON}
+                              <span className="text-[10px] font-mono truncate">{filename}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
 
-            {/* Applied banner + open in vscode per project — hidden for CMS-only fixes */}
+                {/* Resize handle */}
+                <div
+                  style={{ width: "2px", flexShrink: 0, cursor: "col-resize", background: handleHover ? "#2d333a" : "#21262d", transition: "background 0.15s" }}
+                  onMouseEnter={() => setHandleHover(true)}
+                  onMouseLeave={() => { if (!resizing.current) setHandleHover(false); }}
+                  onMouseDown={(e) => {
+                    resizing.current = true;
+                    resizeStartX.current = e.clientX;
+                    resizeStartW.current = treeWidth;
+                    e.preventDefault();
+                  }}
+                />
+
+                {/* Right: code / diff view */}
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, background: "#0d1117" }}>
+                  {selFile && (() => {
+                    const diff = selFile.originalContent ? computeDiff(selFile.originalContent, selFile.content) : null;
+                    const addedCount = diff?.filter((l) => l.type === "added").length ?? 0;
+                    const removedCount = diff?.filter((l) => l.type === "removed").length ?? 0;
+                    const addedLineNums = new Set<number>();
+                    if (diff) {
+                      let lineNum = 1;
+                      for (const line of diff) {
+                        if (line.type === "removed") continue;
+                        if (line.type === "added") addedLineNums.add(lineNum);
+                        lineNum++;
+                      }
+                    }
+                    const copyKey = `${pi}-${selIdx}`;
+                    return (
+                      <>
+                        {/* File bar */}
+                        <div className="flex items-center gap-2 px-3 py-2 shrink-0" style={{ borderBottom: "1px solid #21262d", background: "#161b22" }}>
+                          <span className="text-[11px] font-mono text-[#8b949e] truncate flex-1">{selFile.path}</span>
+                          {diff && (
+                            <span className="flex items-center gap-1.5 text-[11px] shrink-0">
+                              {addedCount > 0 && <span style={{ color: "#58a6ff" }}>+{addedCount}</span>}
+                              {removedCount > 0 && <span style={{ color: "#ef4444" }}>-{removedCount}</span>}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(selFile.content, copyKey)}
+                            className="flex items-center gap-1 text-[11px] px-2 py-1 rounded transition-colors cursor-pointer shrink-0"
+                            style={{ background: copied === copyKey ? "#58a6ff20" : "#21262d", color: copied === copyKey ? "#58a6ff" : "#666" }}
+                          >
+                            {copied === copyKey ? <Check size={10} /> : <Copy size={10} />}
+                            {copied === copyKey ? "Copied!" : "Copy"}
+                          </button>
+                        </div>
+                        {/* Code */}
+                        <div style={{ flex: 1, overflowY: "auto", background: "#0d1117", minWidth: 0 }}>
+                          <CodeBlock code={selFile.content} language={getLang(selFile.path)} addedLines={addedLineNums.size > 0 ? addedLineNums : undefined} />
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* Applied banner + open in vscode */}
             {(!multiProject || projectExpanded[pi]) && solution.fixType !== "cms" && (
               <div className="flex items-center gap-2 mb-3">
-                <div
-                  className="flex-1 rounded-lg px-4 py-2.5 text-[13px]"
-                  style={{ background: "#0d1f38", border: "1px solid #58a6ff30", color: "#58a6ff" }}
-                >
+                <div className="flex-1 rounded-lg px-4 py-2.5 text-[13px]" style={{ background: "#0d1f38", border: "1px solid #58a6ff30", color: "#58a6ff" }}>
                   ✓ Changes applied{multiProject ? ` to ${projectName}` : " to your project"}.
                 </div>
                 {projectPath && (
@@ -291,7 +327,6 @@ export function SolutionPanel({ projects, ticketSubject, ticketRequest, godfathe
               </div>
             )}
 
-            {/* Divider between projects */}
             {multiProject && pi < projects.length - 1 && (
               <div className="my-5" style={{ borderTop: "1px solid #1a1a1a" }} />
             )}
@@ -299,7 +334,7 @@ export function SolutionPanel({ projects, ticketSubject, ticketRequest, godfathe
         );
       })}
 
-      {/* Save to history — once for all projects */}
+      {/* Save to history */}
       <div className="mt-2 flex justify-end">
         <button
           type="button"
@@ -313,11 +348,7 @@ export function SolutionPanel({ projects, ticketSubject, ticketRequest, godfathe
             cursor: saveState === "saved" ? "default" : "pointer",
           }}
         >
-          {saveState === "saved"
-            ? "✓ Saved to History"
-            : saveState === "error"
-            ? "Save failed"
-            : `Save to History${multiProject ? ` (${projects.length} projects)` : ""}`}
+          {saveState === "saved" ? "✓ Saved to History" : saveState === "error" ? "Save failed" : `Save to History${multiProject ? ` (${projects.length} projects)` : ""}`}
         </button>
       </div>
     </div>

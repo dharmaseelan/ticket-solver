@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { LayoutTemplate, Puzzle, RefreshCw, ChevronDown, ChevronRight, Package, FolderOpen, AlertCircle, X, Trash2, Code2, Layers, FileCode, Box, Zap, KeyRound } from "lucide-react";
+import { LayoutTemplate, Puzzle, RefreshCw, ChevronDown, ChevronRight, Package, FolderOpen, AlertCircle, X, Trash2, Code2, Layers, FileCode, Box, Zap, KeyRound, ExternalLink } from "lucide-react";
 import { FolderPicker } from "@/app/components/FolderPicker";
 import dynamic from "next/dynamic";
 const CodeBlock = dynamic(() => import("@/app/components/CodeBlock"), { ssr: false });
@@ -79,6 +79,17 @@ export default function PageBuilderSetupPage() {
   const [generatedExpanded, setGeneratedExpanded] = useState<Record<string, boolean>>({});
   const [generatedFileTab, setGeneratedFileTab] = useState<Record<string, number>>({});
   const [generatedTreeFile, setGeneratedTreeFile] = useState<Record<string, string>>({});
+  const [previewLoading, setPreviewLoading] = useState<Record<string, boolean>>({});
+  const [previewError, setPreviewError] = useState<Record<string, string>>({});
+  const [previewStatusMsg, setPreviewStatusMsg] = useState<Record<string, string>>({});
+  const [previewPort, setPreviewPort] = useState("3001");
+  const [allPreviewLoading, setAllPreviewLoading] = useState(false);
+  const [allPreviewError, setAllPreviewError] = useState("");
+  const [allPreviewStatusMsg, setAllPreviewStatusMsg] = useState("");
+  const [allPreviewPort, setAllPreviewPort] = useState<number | null>(null);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedBuilderComp, setSelectedBuilderComp] = useState<{ projectPath: string; compName: string } | null>(null);
 
   useEffect(() => {
@@ -114,10 +125,17 @@ export default function PageBuilderSetupPage() {
     };
   }, []);
 
+  function showToast(msg: string) {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 3000);
+  }
+
   async function scanProjects(root: string) {
     setScanning(true);
     setScanError("");
     setScanProgress(null);
+    setProjects([]);
 
     try {
       const res = await fetch("/api/page-builder/scan", {
@@ -153,6 +171,26 @@ export default function PageBuilderSetupPage() {
               }
               return next;
             });
+            // Re-read generated entry file content from disk
+            setGeneratedEntries((prev) => {
+              const entries = Object.entries(prev);
+              if (!entries.length) return prev;
+              Promise.all(
+                entries.map(async ([key, entry]) => {
+                  const res = await fetch("/api/page-builder/read-component-files", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ projectPath: entry.projectPath, compName: entry.compName }),
+                  }).then((r) => r.json());
+                  return [key, res.files?.length ? { ...entry, files: res.files } : entry] as const;
+                })
+              ).then((updated) => {
+                const next = Object.fromEntries(updated);
+                setGeneratedEntries(next);
+                localStorage.setItem("pbGeneratedEntries", JSON.stringify(next));
+              });
+              return prev;
+            });
           } else if (msg.type === "error") {
             setScanError(msg.error);
           }
@@ -168,6 +206,11 @@ export default function PageBuilderSetupPage() {
 
   function saveRoot() {
     const v = pbRootInput.trim().replace(/\/$/, "");
+    if (v !== pbRootPath) {
+      setGeneratedEntries({});
+      localStorage.removeItem("pbGeneratedEntries");
+      setAllPreviewPort(null);
+    }
     setPbRootPath(v);
     localStorage.setItem("pbRootPath", v);
     scanProjects(v);
@@ -407,6 +450,17 @@ export default function PageBuilderSetupPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-5 py-8">
+      {/* Toast */}
+      {toast && (
+        <div
+          className="fixed bottom-5 right-5 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-semibold shadow-xl"
+          style={{ background: "#161b22", border: "1px solid #30363d", color: "#e6edf3" }}
+        >
+          <span style={{ color: "#3fb950" }}>✓</span>
+          {toast}
+        </div>
+      )}
+
       {/* Delete generated component confirmation */}
       {deleteGeneratedTarget && (() => {
         const entry = generatedEntries[deleteGeneratedTarget];
@@ -430,11 +484,16 @@ export default function PageBuilderSetupPage() {
                   onClick={async () => {
                     const entry = generatedEntries[deleteGeneratedTarget];
                     if (entry) {
-                      await fetch("/api/page-builder/delete", {
+                      const res = await fetch("/api/page-builder/delete", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ projectPath: entry.projectPath, componentName: entry.compName }),
-                      });
+                      }).then((r) => r.json());
+                      if (res.error) {
+                        showToast(`Delete failed: ${res.error}`);
+                        setDeleteGeneratedTarget(null);
+                        return;
+                      }
                       if (pbRootPath) scanProjects(pbRootPath);
                     }
                     setGeneratedEntries((prev) => {
@@ -1483,6 +1542,89 @@ export default function PageBuilderSetupPage() {
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-[11px] uppercase tracking-widest text-[#3fb950]">Generated Components</span>
                   {entries.length > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#0d2b1d", color: "#3fb950" }}>{entries.length}</span>}
+                  <div className="flex-1" />
+                  {entries.length > 0 && (
+                    allPreviewLoading ? (
+                      <div className="flex items-center gap-1.5 text-[10px]" style={{ color: "#8b949e" }}>
+                        <RefreshCw size={11} className="animate-spin" />
+                        {allPreviewStatusMsg || "Starting…"}
+                      </div>
+                    ) : allPreviewError ? (
+                      <div className="flex items-center gap-1.5">
+                        <AlertCircle size={11} style={{ color: "#f85149", flexShrink: 0 }} />
+                        <span className="text-[10px] font-mono truncate max-w-[260px]" style={{ color: "#f85149" }}>{allPreviewError}</span>
+                        <button type="button" onClick={() => setAllPreviewError("")} style={{ color: "#484f58" }}><X size={10} /></button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setResetLoading(true);
+                          const components = entries.map((e) => ({ projectPath: e.projectPath, compName: e.compName }));
+                          await fetch("/api/page-builder/write-preview", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ components }),
+                          });
+                          setResetLoading(false);
+                          showToast("Preview refreshed — check the browser tab!");
+                        }}
+                        disabled={resetLoading}
+                        className="flex items-center justify-center px-2 rounded text-[10px] font-semibold cursor-pointer transition-opacity hover:opacity-80 disabled:opacity-50"
+                        style={{ background: "#0d1117", color: "#8b949e", border: "1px solid #30363d", height: "26px", width: "26px" }}
+                        title="Refresh preview with latest components"
+                      >
+                        <RefreshCw size={10} className={resetLoading ? "animate-spin" : ""} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setAllPreviewLoading(true);
+                          setAllPreviewError("");
+                          setAllPreviewStatusMsg("Writing preview entry…");
+
+                          const components = entries.map((e) => ({ projectPath: e.projectPath, compName: e.compName }));
+                          const writeRes = await fetch("/api/page-builder/write-preview", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ components }),
+                          }).then((r) => r.json());
+
+                          if (writeRes.error) {
+                            setAllPreviewLoading(false);
+                            setAllPreviewError(writeRes.error);
+                            return;
+                          }
+
+                          setAllPreviewStatusMsg("Opening VSCode…");
+
+                          const res = await fetch("/api/page-builder/open-terminal", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ projectPath: entries[0].projectPath }),
+                          }).then((r) => r.json());
+
+                          setAllPreviewLoading(false);
+
+                          if (res.error) {
+                            setAllPreviewError(res.error);
+                            return;
+                          }
+
+                          setAllPreviewPort(res.port);
+                          window.open(`http://localhost:${res.port}/_pb-preview`, "_blank");
+                        }}
+                        disabled={!!allPreviewPort}
+                        className="flex items-center gap-1 px-2 rounded text-[10px] font-semibold transition-opacity hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                        style={{ background: "#0d1f38", color: "#58a6ff", border: "1px solid #58a6ff28", height: "26px" }}
+                      >
+                        <ExternalLink size={10} />
+                        Open Preview
+                      </button>
+                      </div>
+                    )
+                  )}
                 </div>
                 {entries.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-10 gap-3">
@@ -1536,7 +1678,11 @@ export default function PageBuilderSetupPage() {
                             </svg>
                           );
                           return (
-                            <div style={{ display: "flex", borderTop: "1px solid #21262d", height: "320px", userSelect: builderResizing.current ? "none" : "auto" }}>
+                            <div style={{ display: "flex", flexDirection: "column", borderTop: "1px solid #21262d" }}>
+                              <div className="flex items-center gap-2 px-3 py-1.5" style={{ borderBottom: "1px solid #21262d", background: "#0d1117" }}>
+                                <span className="flex-1 text-[10px]" style={{ color: "#484f58" }}>Code</span>
+                              </div>
+                              <div style={{ display: "flex", height: "320px", userSelect: builderResizing.current ? "none" : "auto" }}>
                               <div style={{ width: `${builderTreeWidth}px`, flexShrink: 0, overflowY: "auto", overflowX: "hidden" }}>
                                 <div className="flex items-center gap-1.5 px-3 py-1.5" style={{ color: "#6e7681" }}>
                                   {folderIcon}
@@ -1575,6 +1721,7 @@ export default function PageBuilderSetupPage() {
                                 ) : (
                                   <div className="flex items-center justify-center h-full text-[12px]" style={{ color: "#484f58" }}>Select a file</div>
                                 )}
+                              </div>
                               </div>
                             </div>
                           );
