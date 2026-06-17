@@ -8,6 +8,7 @@ const roboto = Roboto({ subsets: ["latin"], weight: ["400", "500", "700"] });
 export const metadata: Metadata = {
   title: "Sentry",
   description: "Sourceflow HubSpot ticket triage & fix agent",
+  icons: { icon: "/favicon.svg" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
