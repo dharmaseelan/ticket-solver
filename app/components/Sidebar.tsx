@@ -49,7 +49,7 @@ export function Sidebar() {
       className="flex flex-col h-screen sticky top-0 shrink-0 overflow-hidden"
       style={{
         width: collapsed ? 56 : 260,
-        background: "#0d1117",
+        background: "rgb(22, 27, 34)",
         borderRight: "1px solid #30363d",
         transition: "width 0.2s ease",
       }}
@@ -64,13 +64,14 @@ export function Sidebar() {
         }}
       >
         {!collapsed && (
-          <div className="flex items-center gap-3 min-w-0">
+          <Link href="/" className="flex items-center gap-3 min-w-0 transition-opacity duration-200 hover:opacity-70">
+            <Image src="/SF_SYMBOL_MONO_WHITE.png" alt="Logo" width={26} height={26} className="shrink-0" style={{ width: "26px", height: "26px", opacity: 0.9 }} />
             <div className="min-w-0">
-              <div className="font-bold leading-tight truncate" style={{ color: "#ffffff", fontSize: 24 }}>
+              <div className="font-bold leading-tight truncate" style={{ color: "#ffffff", fontSize: 15, textTransform: "uppercase", letterSpacing: "1.5px", opacity: 0.9, marginLeft: "-3px" }}>
                 Revive
               </div>
             </div>
-          </div>
+          </Link>
         )}
 
         <button
@@ -87,7 +88,7 @@ export function Sidebar() {
       {/* Nav */}
       <nav className="flex flex-col gap-0.5 p-2 flex-1">
         {[
-          { href: "/", label: "Tickets", icon: Zap },
+          { href: "/tickets", label: "Tickets", icon: Zap },
           { href: "/page-builder-setup", label: "Page Builder", icon: LayoutTemplate },
           { href: "/ai-job-search", label: "AI Job Search", icon: BrainCircuit },
           { href: "/projects", label: "Projects", icon: FolderGit2, count: projectCount },
@@ -99,24 +100,24 @@ export function Sidebar() {
               key={href}
               href={href}
               title={collapsed ? label : undefined}
-              className="flex items-center rounded-xl text-[13px] font-medium transition-colors"
+              className={`flex items-center rounded-md text-[13px] font-normal transition-colors ${!active ? "hover:bg-[#1c2128]" : ""}`}
               style={{
                 gap: collapsed ? 0 : 12,
                 padding: collapsed ? "10px 0" : "10px 12px",
                 justifyContent: collapsed ? "center" : "flex-start",
-                background: active ? "#58a6ff18" : "transparent",
+                background: active ? "#58a6ff18" : undefined,
                 color: active ? "#58a6ff" : "#6e7681",
                 border: active ? "1px solid #58a6ff28" : "1px solid transparent",
               }}
             >
-              <Icon size={16} />
+              <Icon size={16} strokeWidth={1} />
               {!collapsed && (
                 <>
                   <span className="flex-1">{label}</span>
                   {count != null && count > 0 && (
                     <span
-                      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none"
-                      style={{ background: active ? "#58a6ff30" : "#21262d", color: active ? "#58a6ff" : "#8b949e" }}
+                      className="text-[10px] font-normal leading-none"
+                      style={{ color: active ? "#58a6ff" : "#8b949e" }}
                     >
                       {count}
                     </span>

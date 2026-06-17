@@ -492,7 +492,6 @@ export default function PageBuilderSetupPage() {
         <div className="flex flex-col gap-4">
           <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
 
-            <div className="text-[11px] text-[#8b949e] mb-1.5">Project folder</div>
             <div className="flex gap-2 items-center">
               <div
                 className="flex-1 px-3 py-2 rounded-lg text-[12px] truncate"
@@ -1067,8 +1066,7 @@ export default function PageBuilderSetupPage() {
         <div className="flex flex-col gap-4">
           <div className="rounded-2xl p-5" style={{ background: "#161b22", border: "1px solid #30363d" }}>
             {/* Root folder picker */}
-            <div className="mb-5">
-              <div className="text-[11px] text-[#8b949e] mb-1.5">Projects root folder</div>
+            <div>
               <div className="flex gap-2 items-center">
                 <div
                   className="flex-1 px-3 py-2 rounded-lg text-[12px] truncate"
@@ -1160,10 +1158,10 @@ export default function PageBuilderSetupPage() {
 
             {/* Empty states */}
             {!scanning && !scanError && !pbRootPath && (
-              <div className="text-[12px] text-[#484f58] py-2">Set a root folder to scan for projects.</div>
+              <div className="text-[12px] text-[#484f58]" style={{ paddingTop: "10px", paddingBottom: 0 }}>Set a root folder to scan for projects.</div>
             )}
             {!scanning && !scanError && pbRootPath && projects.length === 0 && (
-              <div className="text-[12px] text-[#484f58] py-2">No projects found in this folder.</div>
+              <div className="text-[12px] text-[#484f58]" style={{ paddingTop: "10px", paddingBottom: 0 }}>No projects found in this folder.</div>
             )}
             {!scanning && !scanError && pbRootPath && projects.length > 0 && setupProjects.length === 0 && (
               <div className="rounded-lg px-4 py-3 text-[12px]" style={{ background: "#0d1f38", border: "1px solid #58a6ff30", color: "#58a6ff" }}>
